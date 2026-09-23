@@ -1,0 +1,1258 @@
+<!DOCTYPE html>
+<html lang="ru" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firebird — Умный подбор event-подрядчиков</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fire: {
+                            50: '#fff7ed',
+                            100: '#ffedd5',
+                            500: '#f97316',
+                            600: '#ea580c',
+                            700: '#c2410c',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <!-- Font Inter & FontAwesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { font-family: 'Inter', sans-serif; background:#f8f8f7; }
+        .bg-gradient-to-r.from-stone-900,.bg-gradient-to-r.from-violet-900,.bg-gradient-to-r.from-orange-600 { background-image:none !important; background-color:#fff !important; color:#1c1917 !important; border:1px solid #e7e5e4; }
+        .bg-gradient-to-r.from-stone-900 p,.bg-gradient-to-r.from-violet-900 p,.bg-gradient-to-r.from-orange-600 p { color:#57534e !important; }
+        .bg-gradient-to-tr.from-orange-600 { background-image:none !important; background-color:#ea580c !important; }
+        .rounded-3xl { border-radius:1rem !important; }
+        .shadow-xl,.shadow-lg,.shadow-md,.shadow-sm { box-shadow:0 1px 3px rgb(28 25 23 / 8%) !important; }
+        #event-map { height:360px; border-radius:12px; z-index:1; }
+        .leaflet-container { font-family:Inter,sans-serif; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; animation: rise-in .24s ease-out; }
+        @keyframes rise-in { from { opacity:.35; transform:translateY(5px) } to { opacity:1; transform:none } }
+        :focus-visible { outline:3px solid #fb923c; outline-offset:2px; }
+        .tab-content h2 { text-wrap:balance; }
+        @media (max-width: 767px) { header .max-w-7xl { min-height:4.5rem; height:auto; padding-top:.5rem; padding-bottom:.5rem; } }
+        @media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; } }
+    </style>
+</head>
+<body class="bg-stone-50 text-stone-900 h-full flex flex-col antialiased">
+
+    <header class="bg-white border-b border-stone-200 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-orange-600 to-amber-500 flex items-center justify-center text-white shadow-md shadow-orange-500/20">
+                    <i class="fa-solid fa-fire text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-stone-900">Firebird <span class="text-xs px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full font-medium ml-2" data-i18n="brand_tag">Ивент-Матчинг</span></h1>
+                    <p class="text-xs text-stone-500" data-i18n="brand_sub">Умный подбор event-подрядчиков за секунды</p>
+                </div>
+            </div>
+
+            <div class="flex items-center">
+            <!-- Language Switcher -->
+            <div class="flex items-center space-x-1 bg-stone-100 rounded-lg p-1 mr-3">
+                <button onclick="setLanguage('kz')" id="lang-kz" class="lang-btn px-2.5 py-1 text-xs font-bold rounded-md transition-all">KZ</button>
+                <button onclick="setLanguage('ru')" id="lang-ru" class="lang-btn px-2.5 py-1 text-xs font-bold rounded-md transition-all">RU</button>
+                <button onclick="setLanguage('en')" id="lang-en" class="lang-btn px-2.5 py-1 text-xs font-bold rounded-md transition-all">EN</button>
+            </div>
+
+            <!-- Navigation Tabs -->
+            <nav class="hidden md:flex space-x-1 bg-stone-100 p-1 rounded-xl">
+                <button onclick="switchTab('search')" id="nav-search" class="px-3 py-2 text-sm font-medium rounded-lg transition-all bg-white text-stone-900 shadow-sm">
+                    <i class="fa-solid fa-wand-magic-sparkles mr-1.5 text-orange-500"></i><span data-i18n="nav_search">Умный подбор</span>
+                </button>
+                <button onclick="switchTab('catalog')" id="nav-catalog" class="px-3 py-2 text-sm font-medium rounded-lg transition-all text-stone-600 hover:text-stone-900">
+                    <i class="fa-solid fa-address-book mr-1.5"></i><span data-i18n="nav_catalog">Каталог</span> (<span id="total-count">66</span>)
+                </button>
+                <button onclick="switchTab('advisor')" id="nav-advisor" class="px-3 py-2 text-sm font-medium rounded-lg transition-all text-stone-600 hover:text-stone-900">
+                    <i class="fa-solid fa-robot mr-1.5 text-violet-500"></i><span data-i18n="nav_advisor">ИИ-советник</span>
+                </button>
+                <button onclick="switchTab('organizer')" id="nav-organizer" class="px-3 py-2 text-sm font-medium rounded-lg transition-all text-stone-600 hover:text-stone-900">
+                    <i class="fa-solid fa-list-check mr-1.5 text-sky-500"></i><span data-i18n="nav_organizer">Организатор</span>
+                </button>
+                <button onclick="switchTab('shortlist')" id="nav-shortlist" class="px-3 py-2 text-sm font-medium rounded-lg transition-all text-stone-600 hover:text-stone-900 relative">
+                    <i class="fa-solid fa-heart mr-1.5 text-rose-500"></i><span data-i18n="nav_shortlist">Шортлист</span>
+                    <span id="shortlist-badge" class="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] w-5 h-5 rounded-full flex items-center justify-center font-bold hidden">0</span>
+                </button>
+                <button onclick="switchTab('budget')" id="nav-budget" class="px-3 py-2 text-sm font-medium rounded-lg transition-all text-stone-600 hover:text-stone-900">
+                    <i class="fa-solid fa-calculator mr-1.5 text-emerald-500"></i><span data-i18n="nav_budget">Бюджет</span>
+                </button>
+                <button onclick="switchTab('services')" id="nav-services" class="px-3 py-2 text-sm font-medium rounded-lg transition-all text-stone-600 hover:text-stone-900"><i class="fa-solid fa-layer-group mr-1.5 text-orange-500"></i><span data-i18n="nav_services">Сервистер</span></button>
+            </nav>
+            </div>
+
+            <!-- Mobile menu button -->
+            <div class="md:hidden flex items-center">
+                <button onclick="toggleMobileMenu()" class="p-2 text-stone-600 hover:text-stone-900">
+                    <i class="fa-solid fa-bars text-xl"></i>
+                </button>
+            </div>
+        </div>
+        <!-- Mobile Dropdown Menu -->
+        <div id="mobile-menu" class="hidden md:hidden bg-white border-b border-stone-200 px-4 pt-2 pb-4 space-y-2">
+            <div class="flex space-x-1 bg-stone-100 rounded-lg p-1 mb-2 w-fit">
+                <button onclick="setLanguage('kz')" class="lang-btn px-3 py-1 text-xs font-bold rounded-md">KZ</button>
+                <button onclick="setLanguage('ru')" class="lang-btn px-3 py-1 text-xs font-bold rounded-md">RU</button>
+                <button onclick="setLanguage('en')" class="lang-btn px-3 py-1 text-xs font-bold rounded-md">EN</button>
+            </div>
+            <button onclick="switchTab('search'); toggleMobileMenu();" class="block w-full text-left px-3 py-2 rounded-lg font-medium text-stone-800 hover:bg-stone-100" data-i18n="nav_search">Умный подбор</button>
+            <button onclick="switchTab('catalog'); toggleMobileMenu();" class="block w-full text-left px-3 py-2 rounded-lg font-medium text-stone-800 hover:bg-stone-100" data-i18n="nav_catalog">Каталог</button>
+            <button onclick="switchTab('advisor'); toggleMobileMenu();" class="block w-full text-left px-3 py-2 rounded-lg font-medium text-stone-800 hover:bg-stone-100" data-i18n="nav_advisor">ИИ-советник</button>
+            <button onclick="switchTab('organizer'); toggleMobileMenu();" class="block w-full text-left px-3 py-2 rounded-lg font-medium text-stone-800 hover:bg-stone-100" data-i18n="nav_organizer">Организатор</button>
+            <button onclick="switchTab('shortlist'); toggleMobileMenu();" class="block w-full text-left px-3 py-2 rounded-lg font-medium text-stone-800 hover:bg-stone-100" data-i18n="nav_shortlist">Шортлист & Сравнение</button>
+            <button onclick="switchTab('budget'); toggleMobileMenu();" class="block w-full text-left px-3 py-2 rounded-lg font-medium text-stone-800 hover:bg-stone-100" data-i18n="nav_budget">Калькулятор бюджета</button>
+            <button onclick="switchTab('services'); toggleMobileMenu();" class="block w-full text-left px-3 py-2 rounded-lg font-medium text-stone-800 hover:bg-stone-100" data-i18n="nav_services">Сервистер</button>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+
+        <!-- TAB 1: SMART SEARCH -->
+        <div id="tab-search" class="tab-content active space-y-8">
+            <!-- Hero Search Card -->
+            <div class="bg-gradient-to-r from-stone-900 to-stone-800 text-white rounded-3xl p-6 sm:p-10 shadow-xl relative overflow-hidden">
+                <div class="absolute -right-10 -bottom-10 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="relative z-10 max-w-2xl mb-8">
+                    <h2 class="text-3xl font-bold tracking-tight mb-3" data-i18n="hero_title">Найдите идеальных подрядчиков за 1 клик</h2>
+                    <p class="text-stone-300 text-sm sm:text-base" data-i18n="hero_sub">Задайте параметры вашего мероприятия, и наш алгоритм подберет до 3 лучших проверенных специалистов, свободных в вашу дату.</p>
+                </div>
+
+                <!-- Search Form Grid -->
+                <div class="bg-stone-50 p-4 sm:p-6 rounded-xl border border-stone-200 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <!-- City -->
+                    <div>
+                        <label class="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2"><i class="fa-solid fa-city mr-1.5 text-orange-400"></i><span data-i18n="lbl_city">Город</span></label>
+                        <select id="search-city" class="w-full bg-stone-900/80 border border-stone-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="Алматы">Алматы</option>
+                            <option value="Астана">Астана</option>
+                        </select>
+                    </div>
+                    <!-- Category -->
+                    <div>
+                        <label class="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2"><i class="fa-solid fa-tags mr-1.5 text-orange-400"></i><span data-i18n="lbl_cat">Категория</span></label>
+                        <select id="search-cat" class="w-full bg-stone-900/80 border border-stone-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="Ведущий">Ведущий</option>
+                            <option value="Фотограф">Фотограф</option>
+                            <option value="Видеограф">Видеограф</option>
+                            <option value="Банкетный зал">Банкетный зал / Ресторан</option>
+                            <option value="Лайв-бэнд">Лайв-бэнд</option>
+                            <option value="Флорист">Флорист</option>
+                            <option value="Декоратор">Декоратор</option>
+                            <option value="Ведущий церемонии">Ведущий церемонии</option>
+                            <option value="Инструменталист">Инструменталист</option>
+                            <option value="Фото и видеобудки">Фото и видеобудки</option>
+                        </select>
+                    </div>
+                    <!-- Format -->
+                    <div>
+                        <label class="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2"><i class="fa-solid fa-glass-cheers mr-1.5 text-orange-400"></i><span data-i18n="lbl_format">Формат</span></label>
+                        <select id="search-format" class="w-full bg-stone-900/80 border border-stone-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="свадьба">Свадьба</option>
+                            <option value="корпоратив">Корпоратив</option>
+                            <option value="юбилей">Юбилей</option>
+                            <option value="той">Той</option>
+                            <option value="конференция">Конференция</option>
+                            <option value="день рождения">День рождения</option>
+                        </select>
+                    </div>
+                    <!-- Date -->
+                    <div>
+                        <label class="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2"><i class="fa-solid fa-calendar mr-1.5 text-orange-400"></i><span data-i18n="lbl_date">Дата события</span></label>
+                        <input type="date" id="search-date" value="2026-12-15" min="2026-09-23" max="2026-12-31" class="w-full bg-stone-900/80 border border-stone-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <!-- Budget -->
+                    <div>
+                        <label class="block text-xs font-semibold text-stone-600 uppercase tracking-wider mb-2"><i class="fa-solid fa-tenge-sign mr-1.5 text-orange-400"></i><span data-i18n="lbl_budget">Макс. бюджет</span></label>
+                        <select id="search-budget" class="w-full bg-stone-900/80 border border-stone-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-orange-500">
+                            <option value="300000">до 300 000 ₸</option>
+                            <option value="600000">до 600 000 ₸</option>
+                            <option value="1000000">до 1 000 000 ₸</option>
+                            <option value="2000000" selected>до 2 000 000 ₸</option>
+                            <option value="10000000">Без лимита</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Search Button -->
+                <div class="mt-6 flex justify-end">
+                    <button onclick="runSmartMatch()" class="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-8 py-3.5 rounded-xl shadow-lg shadow-orange-500/30 transition-all transform hover:-translate-y-0.5 flex items-center space-x-2">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span data-i18n="btn_search">Подобрать топ-3 подрядчика</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search Results Area -->
+            <div id="search-results-section" class="space-y-6">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-xl font-bold text-stone-900 flex items-center">
+                        <i class="fa-solid fa-list-check text-orange-500 mr-2"></i><span data-i18n="results_title">Результаты умного подбора</span>
+                    </h3>
+                    <span id="results-meta" class="text-sm text-stone-500 font-medium">Найдено лучших совпадений: 3</span>
+                </div>
+
+                <!-- Cards Container -->
+                <div id="match-cards-container" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: FULL CATALOG -->
+        <div id="tab-catalog" class="tab-content space-y-6">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-2xl border border-stone-200 shadow-sm">
+                <div>
+                    <h2 class="text-2xl font-bold text-stone-900" data-i18n="catalog_title">Каталог всех подрядчиков</h2>
+                    <p class="text-sm text-stone-500" data-i18n="catalog_sub">Полный список из 66 профилей с фильтрацией по категориям и городам.</p>
+                </div>
+                <div class="flex flex-wrap gap-2" id="catalog-filter-buttons">
+                    <button onclick="filterCatalog('__all__')" class="cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-900 text-white transition-all" data-i18n="filter_all">Все</button>
+                    <button onclick="filterCatalog('Ведущий')" class="cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-100 text-stone-700 hover:bg-stone-200 transition-all" data-i18n="filter_host">Ведущие</button>
+                    <button onclick="filterCatalog('Фотограф')" class="cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-100 text-stone-700 hover:bg-stone-200 transition-all" data-i18n="filter_photo">Фотографы</button>
+                    <button onclick="filterCatalog('Банкетный зал')" class="cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-100 text-stone-700 hover:bg-stone-200 transition-all" data-i18n="filter_venue">Банкетные залы</button>
+                    <button onclick="filterCatalog('Лайв-бэнд')" class="cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-100 text-stone-700 hover:bg-stone-200 transition-all" data-i18n="filter_band">Лайв-бэнды</button>
+                    <button onclick="filterCatalog('Флорист')" class="cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-100 text-stone-700 hover:bg-stone-200 transition-all" data-i18n="filter_florist">Флористы</button>
+                </div>
+            </div>
+
+            <!-- Grid of All Contractors -->
+            <div id="full-catalog-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- TAB 3: SHORTLIST & COMPARE -->
+        <div id="tab-shortlist" class="tab-content space-y-6">
+            <div class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-stone-900" data-i18n="shortlist_title">Шортлист и сравнение</h2>
+                    <p class="text-sm text-stone-500" data-i18n="shortlist_sub">Сравните выбранных подрядчиков по ключевым параметрам в удобной таблице.</p>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button onclick="shareWhatsApp()" class="px-4 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-xl transition-all"><i class="fa-brands fa-whatsapp mr-1.5"></i><span data-i18n="btn_share_wa">Поделиться в WhatsApp</span></button>
+                    <button onclick="shareTelegram()" class="px-4 py-2 text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-xl transition-all"><i class="fa-brands fa-telegram mr-1.5"></i><span data-i18n="btn_share_tg">Поделиться в Telegram</span></button>
+                    <button onclick="clearShortlist()" class="px-4 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl transition-all">
+                        <i class="fa-solid fa-trash mr-1.5"></i><span data-i18n="btn_clear">Очистить шортлист</span>
+                    </button>
+                </div>
+            </div>
+
+            <div id="shortlist-empty" class="text-center py-16 bg-white rounded-2xl border border-stone-200 shadow-sm">
+                <div class="w-16 h-16 bg-stone-100 text-stone-400 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                    <i class="fa-solid fa-heart-crack"></i>
+                </div>
+                <h3 class="text-lg font-bold text-stone-800 mb-1" data-i18n="shortlist_empty_title">Ваш шортлист пуст</h3>
+                <p class="text-sm text-stone-500 mb-4" data-i18n="shortlist_empty_sub">Добавляйте подрядчиков из поиска или каталога для сравнения.</p>
+                <button onclick="switchTab('search')" class="px-5 py-2.5 bg-orange-500 hover:bg-orange-600 text-white font-medium text-sm rounded-xl shadow transition-all" data-i18n="btn_goto_search">Перейти к подбору</button>
+            </div>
+
+            <div id="shortlist-content" class="hidden space-y-6">
+                <!-- Comparison Table -->
+                <div class="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-x-auto">
+                    <table class="w-full text-left border-collapse" id="comparison-table">
+                        <!-- Populated by JS -->
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: BUDGET CALCULATOR -->
+        <div id="tab-budget" class="tab-content space-y-6">
+            <div class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm">
+                <h2 class="text-2xl font-bold text-stone-900" data-i18n="budget_title">Калькулятор бюджета мероприятия</h2>
+                <p class="text-sm text-stone-500" data-i18n="budget_sub">Рассчитайте ориентировочную смету вашего ивента и распределите затраты по категориям.</p>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- Inputs -->
+                <div class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm space-y-4 lg:col-span-1">
+                    <h3 class="font-bold text-stone-900 border-b border-stone-100 pb-3">Параметры сметы</h3>
+                    <div>
+                        <label class="block text-xs font-medium text-stone-600 mb-1">Общий бюджет (₸)</label>
+                        <input type="number" id="calc-total-budget" value="3500000" oninput="updateBudgetCalc()" class="w-full border border-stone-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-stone-600 mb-1">Количество гостей</label>
+                        <input type="number" id="calc-guests" value="80" oninput="updateBudgetCalc()" class="w-full border border-stone-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500">
+                    </div>
+                    <div class="pt-4 border-t border-stone-100 space-y-2">
+                        <div class="flex justify-between text-sm">
+                            <span class="text-stone-500">Рекомендуемая аренда площадки (45%):</span>
+                            <span id="calc-res-venue" class="font-bold text-stone-900">0 ₸</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-stone-500">Ведущий и шоу (25%):</span>
+                            <span id="calc-res-show" class="font-bold text-stone-900">0 ₸</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-stone-500">Фото/Видео (15%):</span>
+                            <span id="calc-res-media" class="font-bold text-stone-900">0 ₸</span>
+                        </div>
+                        <div class="flex justify-between text-sm">
+                            <span class="text-stone-500">Декор и флористика (15%):</span>
+                            <span id="calc-res-decor" class="font-bold text-stone-900">0 ₸</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Selected Contractors Summary in Budget -->
+                <div class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm lg:col-span-2 flex flex-col justify-between">
+                    <div>
+                        <h3 class="font-bold text-stone-900 border-b border-stone-100 pb-3 mb-4">Выбранные подрядчики из вашего шортлиста</h3>
+                        <div id="budget-shortlist-items" class="space-y-3">
+                            <!-- Populated by JS -->
+                        </div>
+                    </div>
+                    <div class="mt-6 pt-4 border-t border-stone-200 flex items-center justify-between">
+                        <div>
+                            <p class="text-xs text-stone-500">Итого по выбранным специалистам:</p>
+                            <p class="text-xl font-extrabold text-stone-900" id="budget-shortlist-sum">0 ₸</p>
+                        </div>
+                        <div id="budget-diff-badge" class="px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700">
+                            В пределах бюджета
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 5: AI ADVISOR -->
+        <div id="tab-advisor" class="tab-content space-y-6">
+            <div class="bg-gradient-to-r from-violet-900 to-indigo-900 text-white rounded-3xl p-6 sm:p-10 shadow-xl relative overflow-hidden">
+                <div class="absolute -right-10 -bottom-10 w-96 h-96 bg-violet-500/10 rounded-full blur-3xl pointer-events-none"></div>
+                <div class="relative z-10">
+                    <h2 class="text-2xl sm:text-3xl font-bold tracking-tight mb-2 flex items-center"><i class="fa-solid fa-robot mr-3 text-violet-300"></i><span data-i18n="advisor_title">ИИ-советник по подрядчикам</span></h2>
+                    <p class="text-violet-200 text-sm sm:text-base mb-6" data-i18n="advisor_sub">Опишите ваше мероприятие своими словами — ИИ подберёт и объяснит лучшие варианты из каталога.</p>
+                    <textarea id="advisor-input" rows="3" data-i18n-ph="advisor_placeholder" placeholder="Например: свадьба в Алматы на 150 гостей в декабре, бюджет 3 млн, нужен ведущий на казахском и лайв-бэнд" class="w-full bg-white border border-stone-300 text-stone-900 placeholder-stone-400 text-sm rounded-2xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-violet-400"></textarea>
+                    <div class="mt-4 flex justify-end">
+                        <button onclick="askAdvisor()" id="advisor-ask-btn" class="bg-violet-700 hover:bg-violet-800 text-white font-semibold px-8 py-3 rounded-xl shadow-lg shadow-violet-500/30 transition-all flex items-center space-x-2">
+                            <i class="fa-solid fa-sparkles"></i>
+                            <span data-i18n="advisor_ask">Спросить ИИ-советника</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div id="advisor-result" class="space-y-4"></div>
+        </div>
+
+        <!-- TAB 6: EVENT ORGANIZER -->
+        <div id="tab-organizer" class="tab-content space-y-6">
+            <div class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-2xl font-bold text-stone-900" data-i18n="organizer_title">Организатор мероприятия</h2>
+                    <p class="text-sm text-stone-500" data-i18n="organizer_sub">Чек-лист подготовки и обратный отсчёт до вашего события.</p>
+                </div>
+                <div class="text-right">
+                    <div class="text-3xl font-black text-sky-600"><span id="organizer-days-left">—</span></div>
+                    <div class="text-xs text-stone-500" data-i18n="organizer_days_left">дней до события</div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-sm font-semibold text-stone-700" data-i18n="organizer_progress">Прогресс подготовки</span>
+                    <span id="organizer-progress-text" class="text-sm font-bold text-stone-900">0/0</span>
+                </div>
+                <div class="w-full bg-stone-100 rounded-full h-2.5 overflow-hidden">
+                    <div id="organizer-progress-bar" class="bg-gradient-to-r from-sky-500 to-emerald-500 h-2.5 rounded-full transition-all" style="width:0%"></div>
+                </div>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm space-y-3">
+                <div id="organizer-list" class="space-y-2"></div>
+                <div class="flex items-center gap-2 pt-3 border-t border-stone-100">
+                    <input id="organizer-new-task" type="text" data-i18n-ph="organizer_new_task" placeholder="Добавить свою задачу..." class="flex-grow bg-stone-50 border border-stone-200 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-sky-400">
+                    <button onclick="addCustomTask()" class="bg-stone-900 hover:bg-stone-800 text-white px-4 py-2.5 rounded-xl text-sm font-semibold"><i class="fa-solid fa-plus"></i></button>
+                </div>
+            </div>
+        </div>
+
+
+        <section id="tab-services" class="tab-content space-y-8">
+          <div class="bg-gradient-to-r from-orange-600 to-amber-500 text-white rounded-3xl p-7 sm:p-10 shadow-lg"><h2 class="text-3xl font-bold" data-i18n="services_title">Іс-шараға арналған сервистер</h2><p class="mt-2 text-orange-50" data-i18n="services_sub">Орындар, қонақ пікірлері, төлем жоспары, шығындар және шақыру билеттері бір жерде.</p></div>
+          <div class="grid lg:grid-cols-2 gap-6">
+            <section class="bg-white p-5 sm:p-6 rounded-2xl border border-stone-200 shadow-sm lg:col-span-2">
+              <h3 class="text-xl font-bold mb-1" data-i18n="venues_title">Банкет залдары мен әдемі орындар</h3>
+              <p class="text-xs text-stone-500 mb-4" data-i18n="venues_note">Картадағы нүктелер — орындардың көрсетілген координаттары. Пікірлер демо деректерден басталады.</p>
+              <div class="grid sm:grid-cols-2 gap-3 mb-4">
+                <label class="text-sm text-stone-600"><span data-i18n="filter_city">Қала</span><select id="place-city-filter" class="block w-full mt-1 border border-stone-300 rounded-xl px-3 py-2"><option value="Барлығы">Барлығы</option><option>Астана</option><option>Алматы</option><option>Шымкент</option></select></label>
+                <label class="text-sm text-stone-600"><span data-i18n="filter_category">Санат</span><select id="place-category-filter" class="block w-full mt-1 border border-stone-300 rounded-xl px-3 py-2"><option value="Барлығы">Барлығы</option><option>Банкет залы</option><option>Әдемі орын</option></select></label>
+              </div>
+              <div id="event-map" class="mb-5" role="application" aria-label="Event venue map"></div>
+              <div id="venue-list" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+            </section>
+            <section class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm"><h3 class="text-xl font-bold mb-1" data-i18n="pay_title">Төлем және бөліп төлеу</h3><p class="text-xs text-stone-500 mb-4" data-i18n="pay_note">Төлем демосы. Kaspi, Freedom және Halyk үшін ресми merchant/API келісімі қажет; бұл бет ақша алмайды.</p><label class="block text-sm text-stone-600 mb-1" data-i18n="pay_amount">Сома (₸)</label><input id="pay-amount" type="number" value="300000" min="0" class="w-full border border-stone-300 rounded-xl px-3 py-2 mb-3"><div class="grid sm:grid-cols-2 gap-2"><select id="pay-provider" class="border border-stone-300 rounded-xl px-3 py-2"><option>Kaspi</option><option>Freedom Bank</option><option>Halyk Bank</option></select><select id="pay-installments" class="border border-stone-300 rounded-xl px-3 py-2"><option value="1" data-i18n="pay_full">Толық төлем</option><option value="3">3 ай</option><option value="6">6 ай</option><option value="12">12 ай</option></select></div><p id="pay-estimate" class="text-sm font-semibold mt-3"></p><button onclick="demoPay()" class="mt-3 px-4 py-2 bg-stone-900 text-white rounded-xl text-sm" data-i18n="pay_demo_btn">Төлемді демода көрсету</button></section>
+            <section class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm"><h3 class="text-xl font-bold mb-1" data-i18n="books_title">Шығындар есебі</h3><p class="text-xs text-stone-500 mb-4" data-i18n="books_note">Жазбалар осы браузерде ғана сақталады; бұл бухгалтерлік/салық есебі емес.</p><div class="grid sm:grid-cols-3 gap-2"><input id="expense-name" data-i18n-ph="expense_name_ph" placeholder="Шығын атауы" class="border border-stone-300 rounded-xl px-3 py-2"><input id="expense-amount" type="number" min="0" data-i18n-ph="expense_amount_ph" placeholder="Сома ₸" class="border border-stone-300 rounded-xl px-3 py-2"><button onclick="addExpense()" class="bg-emerald-600 text-white rounded-xl px-3 py-2 text-sm" data-i18n="expense_add">Шығын қосу</button></div><div id="expense-list" class="mt-4 space-y-2"></div><p id="expense-total" class="font-bold mt-3"></p></section>
+            <section class="bg-white p-6 rounded-2xl border border-stone-200 shadow-sm lg:col-span-2"><h3 class="text-xl font-bold mb-1" data-i18n="invite_title">Шақыру билетін жасау</h3><p class="text-xs text-stone-500 mb-4" data-i18n="invite_sub">Деректерді толтырып, жеке мәтіндік шақыру файлын жүктеңіз.</p><div class="grid sm:grid-cols-3 gap-2"><input id="invite-names" data-i18n-ph="invite_names_ph" placeholder="Мысалы: Айдана мен Әли" class="border border-stone-300 rounded-xl px-3 py-2"><input id="invite-date" type="date" class="border border-stone-300 rounded-xl px-3 py-2"><input id="invite-place" data-i18n-ph="invite_place_ph" placeholder="Мекенжай / зал" class="border border-stone-300 rounded-xl px-3 py-2"><input id="invite-phone" type="tel" data-i18n-ph="invite_phone_ph" placeholder="Телефон гостя (WhatsApp)" class="border border-stone-300 rounded-xl px-3 py-2"><input id="invite-email" type="email" data-i18n-ph="invite_email_ph" placeholder="Email гостя" class="border border-stone-300 rounded-xl px-3 py-2"></div><button onclick="makeInvite()" class="mt-3 px-4 py-2 bg-orange-600 text-white rounded-xl text-sm" data-i18n="invite_btn">Шақыруды жасау</button><div id="invite-preview" class="mt-4"></div></section>
+          </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-stone-200 mt-12 py-6">
+        <div class="max-w-7xl mx-auto px-4 text-center text-xs text-stone-500">
+            © 2026 Firebird Хакатон-проект. Умный подбор event-подрядчиков Алматы и Астаны.
+        </div>
+    </footer>
+
+    <!-- Contract / Brief Modal -->
+    <div id="contract-modal" class="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] hidden items-center justify-center p-4">
+        <div class="bg-white rounded-2xl max-w-lg w-full p-6 max-h-[80vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="font-bold text-lg text-stone-900" data-i18n="contract_title">Договор / Техническое задание</h3>
+                <button onclick="closeContractModal()" class="text-stone-400 hover:text-stone-700"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <pre id="contract-text" class="text-xs whitespace-pre-wrap bg-stone-50 border border-stone-200 rounded-xl p-4 mb-4 font-mono text-stone-700"></pre>
+            <div class="flex gap-2">
+                <button onclick="copyContract()" class="flex-grow bg-stone-900 hover:bg-stone-800 text-white text-xs font-semibold py-2.5 rounded-xl"><i class="fa-solid fa-copy mr-1"></i><span data-i18n="btn_copy">Копировать</span></button>
+                <button onclick="downloadContract()" class="flex-grow bg-orange-500 hover:bg-orange-600 text-white text-xs font-semibold py-2.5 rounded-xl"><i class="fa-solid fa-download mr-1"></i><span data-i18n="btn_download">Скачать</span></button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 bg-stone-900 text-white px-5 py-3 rounded-2xl shadow-xl transform translate-y-20 opacity-0 transition-all duration-300 z-50 text-sm font-medium flex items-center space-x-2">
+        <i class="fa-solid fa-circle-check text-emerald-400"></i>
+        <span id="toast-msg">Действие выполнено</span>
+    </div>
+
+    <script>
+        // Full dataset (66 profiles from hackathon)
+        const contractorsData = [
+            { id: "HK-39372", name: "Тони Тони Чоппер", category: "Флорист", city: "Алматы", price: 200000, priceImputed: true, formats: ["свадьба", "корпоратив", "конференция", "юбилей"], languages: ["русский"], maxHours: "не применимо", busyDaysCount: 52, decBusy: 23, desc: "Мы специализируемся на авторском цветочном оформлении и флористике для мероприятий в Алматы. Ежемесячно реализуем более 1000 заказов." },
+            { id: "HK-44733", name: "Буллма", category: "Ведущий", city: "Алматы", price: 1000000, priceImputed: false, formats: ["корпоратив", "конференция", "юбилей", "день рождения"], languages: ["русский", "английский"], maxHours: "6 ч", busyDaysCount: 49, decBusy: 22, desc: "Ведущий мероприятий с опытом работы более 10 лет. Стиль ведения интеллигентный, не напряжный, атмосферный." },
+            { id: "HK-80581", name: "Санджи Виндсмок", category: "Ведущий", city: "Астана", price: 800000, priceImputed: false, formats: ["свадьба", "той", "корпоратив", "юбилей"], languages: ["русский", "казахский"], maxHours: "8 ч", busyDaysCount: 53, decBusy: 22, desc: "Вхожу в Топ лучших ведущих Казахстана по версии AniWed KZ. Резидент клуба импровизаторов Improv Konoha." },
+            { id: "HK-88430", name: "Куррапика", category: "Ведущий", city: "Алматы", price: 500000, priceImputed: false, formats: ["корпоратив", "конференция", "юбилей"], languages: ["русский"], maxHours: "6 ч", busyDaysCount: 56, decBusy: 24, desc: "Профессиональный ведущий мероприятий с современным подходом и тонким чувством аудитории." },
+            { id: "HK-58385", name: "Крилин", category: "Ведущий", city: "Астана", price: 700000, priceImputed: false, formats: ["корпоратив", "день рождения", "юбилей"], languages: ["русский"], maxHours: "6 ч", busyDaysCount: 50, decBusy: 24, desc: "Ведущий, который превращает мероприятие в живое шоу. Финалист лиги AniHumor." },
+            { id: "HK-42352", name: "Эмилия", category: "Ведущий", city: "Алматы", price: 900000, priceImputed: true, formats: ["свадьба", "той"], languages: ["русский", "казахский"], maxHours: "10 ч", busyDaysCount: 47, decBusy: 22, desc: "Опыт ведения свадеб 13 лет. Вел свадьбы в Алматы, Москве, Дубае, Бодруме, Ташкенте." },
+            { id: "HK-37181", name: "Нами", category: "Ведущий", city: "Астана", price: 800000, priceImputed: false, formats: ["корпоратив", "конференция", "свадьба", "юбилей"], languages: ["русский", "казахский"], maxHours: "8 ч", busyDaysCount: 56, decBusy: 22, desc: "Веду мероприятия уже более 15 лет. Основные стили — динамика, импровизация, интерактивы." },
+            { id: "HK-26808", name: "Идзуку Мидория", category: "Ведущий", city: "Астана", price: 600000, priceImputed: true, formats: ["свадьба", "той", "юбилей"], languages: ["русский", "казахский"], maxHours: "8 ч", busyDaysCount: 54, decBusy: 22, desc: "Финалист премии AniWed Awards KZ ’23, резидент авторской группы SakuraLab." },
+            { id: "HK-76268", name: "Сацуки Кусакабэ", category: "Фотограф", city: "Алматы", price: 200000, priceImputed: false, formats: ["свадьба", "той"], languages: ["русский"], maxHours: "10 ч", busyDaysCount: 57, decBusy: 25, desc: "Свадебный фотограф. Вхожу в топ 5 Алматы по версии AniWed Rating." },
+            { id: "HK-10990", name: "Тодороки Шото", category: "Видеограф", city: "Астана", price: 400000, priceImputed: false, formats: ["свадьба"], languages: ["русский", "английский"], maxHours: "12 ч", busyDaysCount: 44, decBusy: 22, desc: "Colorist of the year 2025. Славженная командная работа и качественный результат." },
+            { id: "HK-61323", name: "Тэммари Собаку", category: "Фотограф", city: "Астана", price: 250000, priceImputed: true, formats: ["свадьба", "той"], languages: ["русский", "казахский"], maxHours: "12 ч", busyDaysCount: 47, decBusy: 22, desc: "Свадебный фотожурнализм и документальная съемка мероприятий." },
+            { id: "HK-74914", name: "Киллуа Золдик", category: "Видеограф", city: "Астана", price: 300000, priceImputed: false, formats: ["свадьба", "той"], languages: ["русский", "казахский"], maxHours: "12 ч", busyDaysCount: 56, decBusy: 22, desc: "Свадебный видеограф из Астаны. Работаю по всему Казахстану с душой." },
+            { id: "HK-30583", name: "Леорио Паради", category: "Фотограф", city: "Алматы", price: 350000, priceImputed: false, formats: ["свадьба", "корпоратив", "конференция"], languages: ["русский", "английский"], maxHours: "8 ч", busyDaysCount: 46, decBusy: 23, desc: "Эстетика, атмосфера, детали. География съемок: Франция, Италия, Великобритания, Турция." },
+            { id: "HK-97737", name: "Фэй Валентайн", category: "Фотограф", city: "Астана", price: 200000, priceImputed: false, formats: ["свадьба", "день рождения", "юбилей"], languages: ["русский"], maxHours: "8 ч", busyDaysCount: 46, decBusy: 24, desc: "Профессиональный фотограф из Астаны. Снимаю с душой и вниманием к деталям." },
+            { id: "HK-98562", name: "Какаши Хатаке", category: "Фотограф", city: "Астана", price: 200000, priceImputed: false, formats: ["свадьба", "юбилей"], languages: ["русский"], maxHours: "10 ч", busyDaysCount: 45, decBusy: 24, desc: "Сняла более 80 мероприятий — от камерных до масштабных свадеб." },
+            { id: "HK-53108", name: "Альфонс Элрик", category: "Фотограф", city: "Алматы", price: 300000, priceImputed: true, formats: ["свадьба", "день рождения"], languages: ["русский", "английский"], maxHours: "6 ч", busyDaysCount: 53, decBusy: 24, desc: "Ловлю моменты в Париже, Дубае, Москве, Китае. Свет и тишина внутри кадра." },
+            { id: "HK-11484", name: "Уинри Рокбелл", category: "Декоратор", city: "Алматы", price: 2000000, priceImputed: false, formats: ["свадьба", "юбилей", "корпоратив"], languages: ["русский", "английский"], maxHours: "не применимо", busyDaysCount: 50, decBusy: 23, desc: "Casa Yuki Lusso — студия авторского декора мероприятий премиум-уровня под ключ." },
+            { id: "HK-97041", name: "Тэнъя Иида", category: "Ведущий", city: "Астана", price: 1000000, priceImputed: false, formats: ["свадьба", "той", "корпоратив"], languages: ["казахский", "русский"], maxHours: "10 ч", busyDaysCount: 53, decBusy: 24, desc: "TOP 7 лучших ведущих KZ. Современный, интеллигентный юмор." },
+            { id: "HK-60927", name: "Нико Робин", category: "Подарки и сувениры", city: "Алматы", price: 150000, priceImputed: true, formats: ["свадьба", "корпоратив", "юбилей", "день рождения"], languages: ["русский"], maxHours: "не применимо", busyDaysCount: 54, decBusy: 24, desc: "Konpeito Craft — леденцы без сахара с индивидуальным дизайном и логотипами." },
+            { id: "HK-62242", name: "Юдзи Итадори", category: "Видеограф", city: "Алматы", price: 500000, priceImputed: false, formats: ["свадьба", "корпоратив"], languages: ["русский", "английский"], maxHours: "10 ч", busyDaysCount: 53, decBusy: 22, desc: "Топ-3 видеографов страны по версии AniWed KZ. Победитель Sakura Frame Fest." },
+            { id: "HK-44923", name: "Мицури Канроджи", category: "Ведущий", city: "Алматы", price: 650000, priceImputed: false, formats: ["свадьба", "юбилей", "корпоратив"], languages: ["русский"], maxHours: "8 ч", busyDaysCount: 51, decBusy: 22, desc: "Разработаем оригинальный сценарий и учтем все ваши пожелания." },
+            { id: "HK-91112", name: "Мэгуми Фушигуро", category: "Фотограф", city: "Алматы", price: 300000, priceImputed: false, formats: ["свадьба"], languages: ["русский"], maxHours: "10 ч", busyDaysCount: 47, decBusy: 24, desc: "Свадебный фотограф с тонким чувством эстетики, эмоций и взгляда." },
+            { id: "HK-77793", name: "Спайк Спигел", category: "Ведущий церемонии", city: "Алматы", price: 200000, priceImputed: false, formats: ["свадьба", "той"], languages: ["казахский", "русский"], maxHours: "3 ч", busyDaysCount: 52, decBusy: 22, desc: "Ведущая и церемониймейстер на казахском и русском языках." },
+            { id: "HK-76335", name: "Йор Форджер", category: "Фотограф", city: "Зарубежье", price: 600000, priceImputed: false, formats: ["корпоратив", "конференция", "свадьба"], languages: ["русский", "английский"], maxHours: "8 ч", busyDaysCount: 58, decBusy: 24, desc: "Живые эмоции, естественность и аккуратная эстетика на частных мероприятиях." },
+            { id: "HK-20640", name: "Шикамару Нара", category: "Фотограф", city: "Алматы", price: 150000, priceImputed: false, formats: ["день рождения", "юбилей", "корпоратив"], languages: ["русский"], maxHours: "4 ч", busyDaysCount: 48, decBusy: 22, desc: "Внимание к деталям, живые эмоции и эстетичная подача событий." },
+            { id: "HK-16628", name: "Нобара Кугисаки", category: "Фотограф", city: "Алматы", price: 600000, priceImputed: false, formats: ["свадьба", "корпоратив"], languages: ["русский", "английский"], maxHours: "12 ч", busyDaysCount: 45, decBusy: 23, desc: "Профессиональный фотограф с тонким чувством стиля и естественными кадрами." },
+            { id: "HK-68220", name: "Рок Ли", category: "Фотограф", city: "Алматы", price: 190000, priceImputed: false, formats: ["свадьба", "той", "юбилей"], languages: ["русский", "казахский"], maxHours: "12 ч", busyDaysCount: 47, decBusy: 23, desc: "Один из лучших свадебных фотографов в Алматы. Ответственный и пунктуальный." },
+            { id: "HK-74147", name: "Джет Блэк", category: "Инструменталист", city: "Алматы", price: 500000, priceImputed: false, formats: ["свадьба", "корпоратив", "юбилей"], languages: ["русский", "английский"], maxHours: "4 ч", busyDaysCount: 45, decBusy: 23, desc: "Изысканное музыкальное сопровождение для свадеб и частных событий." },
+            { id: "HK-35913", name: "Тохру", category: "Фотограф", city: "Алматы", price: 400000, priceImputed: true, formats: ["корпоратив", "конференция"], languages: ["русский", "английский"], maxHours: "10 ч", busyDaysCount: 49, decBusy: 22, desc: "Ивент-фотограф с 10+ опытом. Крупные форумы, презентации и бизнес-ивенты." },
+            { id: "HK-46450", name: "Сакура Харуно", category: "Инструменталист", city: "Алматы", price: 350000, priceImputed: false, formats: ["корпоратив", "свадьба", "юбилей", "той"], languages: ["казахский", "русский", "английский"], maxHours: "4 ч", busyDaysCount: 52, decBusy: 23, desc: "Bebop Jazz Collective — джазовый проект с контрабасом и уникальной манерой исполнения." },
+            { id: "HK-25279", name: "Мегумин", category: "Лайв-бэнд", city: "Алматы", price: 800000, priceImputed: false, formats: ["корпоратив", "день рождения", "юбилей"], languages: ["русский"], maxHours: "5 ч", busyDaysCount: 51, decBusy: 25, desc: "Crimson Demon Live! Сверкаем звуком, энергией и атмосферой на сцене." },
+            { id: "HK-92824", name: "Поньо", category: "Национальный ансамбль", city: "Алматы", price: 500000, priceImputed: false, formats: ["свадьба", "той", "юбилей"], languages: ["казахский"], maxHours: "2 ч", busyDaysCount: 50, decBusy: 24, desc: "Ансамбль Sailor Dala, который украсит ваше торжество гармонией песни." },
+            { id: "HK-36965", name: "Эдвард Ван Хог", category: "Национальный ансамбль", city: "Алматы", price: 500000, priceImputed: false, formats: ["той", "свадьба", "юбилей"], languages: ["казахский"], maxHours: "2 ч", busyDaysCount: 50, decBusy: 24, desc: "Выступаем на вашем торжестве и прославляем казахскую песню на весь мир." },
+            { id: "HK-39301", name: "Рамь", category: "Национальный ансамбль", city: "Алматы", price: 500000, priceImputed: false, formats: ["той", "свадьба", "корпоратив"], languages: ["казахский"], maxHours: "2 ч", busyDaysCount: 49, decBusy: 22, desc: "Ансамбль №1 в Казахстане, выступивший перед главой государства." },
+            { id: "HK-45928", name: "Очако Урарака", category: "Видеограф", city: "Алматы", price: 800000, priceImputed: false, formats: ["свадьба", "юбилей", "корпоратив"], languages: ["русский", "английский"], maxHours: "10 ч", busyDaysCount: 51, decBusy: 22, desc: "Атмосферные видео с естественными цветами и искренним настроением." },
+            { id: "HK-83709", name: "Рей Аянами", category: "Лайв-бэнд", city: "Алматы", price: 1150000, priceImputed: false, formats: ["свадьба", "той", "юбилей", "корпоратив"], languages: ["казахский", "русский"], maxHours: "6 ч", busyDaysCount: 47, decBusy: 23, desc: "Eva Sound: ретро-шлягеры, хиты 80-х, 90-х и современные треки." },
+            { id: "HK-23752", name: "Дзэнъицу Агацума", category: "Лайв-бэнд", city: "Алматы", price: 1150000, priceImputed: false, formats: ["свадьба", "той", "юбилей", "корпоратив"], languages: ["казахский", "русский"], maxHours: "6 ч", busyDaysCount: 47, decBusy: 22, desc: "Thunder Breath Band идеально впишется в формат масштабных свадеб и ивентов." },
+            { id: "HK-31819", name: "Каору Камия", category: "Лайв-бэнд", city: "Алматы", price: 1150000, priceImputed: false, formats: ["корпоратив", "день рождения", "юбилей"], languages: ["русский", "английский"], maxHours: "5 ч", busyDaysCount: 55, decBusy: 25, desc: "Rurouni Sound — незабываемое звучание любимых композиций на open-air и сценах." },
+            { id: "HK-57480", name: "Кобаяши", category: "Лайв-бэнд", city: "Алматы", price: 1500000, priceImputed: false, formats: ["корпоратив", "юбилей", "свадьба"], languages: ["русский", "английский"], maxHours: "5 ч", busyDaysCount: 47, decBusy: 24, desc: "KOBAYASHI SHOW BAND — синергия живой музыки, шоу и хореографии." },
+            { id: "HK-35215", name: "Кики", category: "Ведущий", city: "Алматы", price: 900000, priceImputed: false, formats: ["свадьба", "той", "юбилей", "корпоратив"], languages: ["казахский", "русский", "английский"], maxHours: "10 ч", busyDaysCount: 53, decBusy: 22, desc: "Тонкий юмор, харизма и безупречные манеры от ведущего." },
+            { id: "HK-77838", name: "Хаул", category: "Ведущий", city: "Алматы", price: 1000000, priceImputed: false, formats: ["корпоратив", "конференция", "юбилей", "свадьба"], languages: ["русский", "казахский"], maxHours: "8 ч", busyDaysCount: 54, decBusy: 22, desc: "Культурная импровизация, тонкий юмор и естественная энергия." },
+            { id: "HK-72938", name: "Софи Хаттер", category: "Ведущий", city: "Алматы", price: 2000000, priceImputed: false, formats: ["корпоратив", "свадьба", "юбилей", "той"], languages: ["казахский", "русский"], maxHours: "8 ч", busyDaysCount: 49, decBusy: 23, desc: "Участник КВН команды Ghibli Микс. Большая база интерактивных игр." },
+            { id: "HK-27222", name: "Сон Гоку", category: "Ведущий", city: "Алматы", price: 1000000, priceImputed: false, formats: ["свадьба", "той", "корпоратив", "конференция"], languages: ["казахский", "русский"], maxHours: "10 ч", busyDaysCount: 57, decBusy: 23, desc: "Один из самых востребованных двуязычных ведущих Алматы с опытом 12 лет." },
+            { id: "HK-75012", name: "Джинбей", category: "Ведущий", city: "Алматы", price: 1300000, priceImputed: false, formats: ["корпоратив", "конференция"], languages: ["русский", "английский"], maxHours: "6 ч", busyDaysCount: 48, decBusy: 22, desc: "Ведущий технологических форумов, концертов и премиальных ивентов." },
+            { id: "HK-29829", name: "Аня Форджер", category: "Ведущий", city: "Алматы", price: 700000, priceImputed: false, formats: ["день рождения", "корпоратив", "юбилей"], languages: ["русский"], maxHours: "6 ч", busyDaysCount: 47, decBusy: 24, desc: "Без долгих наставлений. Только развлечения, танцы и драйв для любой публики." },
+            { id: "HK-35846", name: "Аска Ленгли", category: "Фото и видеобудки", city: "Алматы", price: 450000, priceImputed: true, formats: ["корпоратив", "свадьба", "юбилей", "конференция"], languages: ["русский", "английский"], maxHours: "6 ч", busyDaysCount: 50, decBusy: 24, desc: "NERV Events: встреча гостей, световые шоу и интерактивные зоны." },
+            { id: "HK-64395", name: "Иноскэ Хашибира", category: "Банкетный зал", city: "Алматы", price: 2500000, priceImputed: true, formats: ["свадьба", "корпоратив", "юбилей", "день рождения"], languages: ["русский", "английский"], maxHours: "8 ч", busyDaysCount: 55, decBusy: 23, desc: "Nerima Terrace — стильная панорамная локация с потрясающим видом на горы." },
+            { id: "HK-72785", name: "Асуна Юки", category: "Банкетный зал", city: "Алматы", price: 6000000, priceImputed: true, formats: ["корпоратив", "конференция", "свадьба", "юбилей"], languages: ["русский", "английский"], maxHours: "10 ч", busyDaysCount: 56, decBusy: 23, desc: "Fuyuki Grand — роскошный отель в башне Sakura Tower с панорамными видами." },
+            { id: "HK-99701", name: "Сосукэ", category: "Банкетный зал", city: "Алматы", price: 4000000, priceImputed: true, formats: ["корпоратив", "конференция", "юбилей"], languages: ["русский", "английский"], maxHours: "8 ч", busyDaysCount: 52, decBusy: 23, desc: "Ouran Golf Club — премиальный гольф-курорт и ресторанный комплекс." },
+            { id: "HK-58236", name: "Шинобу Кочо", category: "Банкетный зал", city: "Алматы", price: 3000000, priceImputed: true, formats: ["той", "свадьба", "юбилей", "корпоратив"], languages: ["казахский", "русский"], maxHours: "8 ч", busyDaysCount: 46, decBusy: 24, desc: "Наусикая — атмосферный ресторан национальной казахской кухни на горе." },
+            { id: "HK-50695", name: "Хината Хьюга", category: "Банкетный зал", city: "Алматы", price: 2000000, priceImputed: true, formats: ["свадьба", "юбилей", "день рождения"], languages: ["русский", "английский"], maxHours: "6 ч", busyDaysCount: 53, decBusy: 24, desc: "Villa Cavallone — элегантный ресторан итальянской и средиземноморской кухни." },
+            { id: "HK-69010", name: "Дарквнесс", category: "Банкетный зал", city: "Алматы", price: 3500000, priceImputed: true, formats: ["корпоратив", "конференция", "свадьба"], languages: ["русский", "английский"], maxHours: "8 ч", busyDaysCount: 48, decBusy: 24, desc: "Totoro Golf Club — гольф-клуб у подножия Заилийского Алатау." },
+            { id: "HK-19103", name: "Мэй Кусакабэ", category: "Национальный ансамбль", city: "Алматы", price: 400000, priceImputed: false, formats: ["той", "свадьба", "юбилей"], languages: ["казахский"], maxHours: "2 ч", busyDaysCount: 47, decBusy: 24, desc: "Sakura Dala — энергичная команда джигитов для духовного праздника." },
+            { id: "HK-90001", name: "Тихиро Огино", category: "Флорист", city: "Алматы", price: 250000, priceImputed: false, formats: ["свадьба", "юбилей", "той"], languages: ["русский", "казахский"], maxHours: "не применимо", busyDaysCount: 49, decBusy: 22, desc: "White Sakura Studio — авторская флористика под цветовую палитру события." },
+            { id: "HK-90002", name: "Хаку", category: "Флорист", city: "Астана", price: 300000, priceImputed: false, formats: ["корпоратив", "конференция", "юбилей", "свадьба"], languages: ["русский"], maxHours: "не применимо", busyDaysCount: 48, decBusy: 23, desc: "Ирис Botanica — оформление welcome-зон, президиумов и фотозон." },
+            { id: "HK-90003", name: "Усопп", category: "Декоратор", city: "Алматы", price: 1800000, priceImputed: false, formats: ["свадьба", "корпоратив"], languages: ["русский"], maxHours: "не применимо", busyDaysCount: 45, decBusy: 24, desc: "Concept Lumen — световые и объёмные инсталляции под ключ." },
+            { id: "HK-90004", name: "Франки", category: "Декоратор", city: "Алматы", price: 2200000, priceImputed: false, formats: ["корпоратив", "конференция", "свадьба"], languages: ["русский"], maxHours: "не применимо", busyDaysCount: 54, decBusy: 24, desc: "Студия Каркас — сценография и декор больших мероприятий премиум-уровня." },
+            { id: "HK-90005", name: "Виолетта Эвергарден", category: "Подарки и сувениры", city: "Алматы", price: 120000, priceImputed: true, formats: ["свадьба", "юбилей"], languages: ["русский"], maxHours: "не применимо", busyDaysCount: 53, decBusy: 24, desc: "Letters & Sweets — именные открытки, карточки рассадки и welcome-боксы." },
+            { id: "HK-90006", name: "Лойд Форджер", category: "Подарки и сувениры", city: "Астана", price: 100000, priceImputed: true, formats: ["корпоратив", "конференция"], languages: ["русский", "английский"], maxHours: "не применимо", busyDaysCount: 56, decBusy: 22, desc: "Print & Magnet Craft — брендированный мерч, фотомагниты и блокноты." },
+            { id: "HK-90007", name: "Субару Нацуки", category: "Ведущий церемонии", city: "Алматы", price: 250000, priceImputed: false, formats: ["свадьба"], languages: ["казахский", "русский"], maxHours: "3 ч", busyDaysCount: 56, decBusy: 22, desc: "Выездная регистрация бракосочетания без шаблонных фраз." },
+            { id: "HK-90008", name: "Рем", category: "Ведущий церемонии", city: "Астана", price: 220000, priceImputed: false, formats: ["свадьба"], languages: ["русский"], maxHours: "3 ч", busyDaysCount: 49, decBusy: 24, desc: "Церемониймейстер выездных регистраций. Спокойная, тёплая подача." },
+            { id: "HK-90009", name: "Кадзума Сато", category: "Фото и видеобудки", city: "Алматы", price: 300000, priceImputed: false, formats: ["свадьба", "корпоратив"], languages: ["русский"], maxHours: "6 ч", busyDaysCount: 47, decBusy: 23, desc: "Instant Frame Booth — фотобудка с мгновенной печатью снимков." },
+            { id: "HK-90010", name: "Аква", category: "Фото и видеобудки", city: "Астана", price: 280000, priceImputed: false, formats: ["свадьба", "корпоратив", "день рождения"], languages: ["русский"], maxHours: "6 ч", busyDaysCount: 53, decBusy: 23, desc: "Magic Mirror Photo — зеркальная фотобудка с сенсорным экраном." },
+            { id: "HK-90011", name: "Гохан", category: "Банкетный зал", city: "Алматы", price: 3200000, priceImputed: true, formats: ["свадьба", "той", "корпоратив", "юбилей"], languages: ["казахский", "русский"], maxHours: "8 ч", busyDaysCount: 46, decBusy: 24, desc: "Grand Sora Hotel — банкетный зал в центре Алматы до 200 гостей." },
+            { id: "HK-90012", name: "Веджита", category: "Банкетный зал", city: "Астана", price: 2800000, priceImputed: true, formats: ["корпоратив", "конференция", "свадьба", "юбилей"], languages: ["русский", "английский"], maxHours: "10 ч", busyDaysCount: 54, decBusy: 24, desc: "Skyline Crown Hotel — отель делового класса с техническим оснащением." },
+            { id: "HK-90013", name: "Ямча", category: "Инструменталист", city: "Алматы", price: 400000, priceImputed: false, formats: ["свадьба", "корпоратив"], languages: ["русский"], maxHours: "3 ч", busyDaysCount: 50, decBusy: 24, desc: "Сольные выступления на скрипке и саксофоне для welcome-зон." }
+        ];
+
+        let shortlist = [];
+        let currentLang = 'ru';
+        let lastAdvisorRes = null;
+
+        // ---------- i18n ----------
+        const UI_STRINGS = {
+            brand_tag: { ru: 'Ивент-Матчинг', kz: 'Іс-шара сәйкестендіру', en: 'Event Matching' },
+            brand_sub: { ru: 'Умный подбор event-подрядчиков за секунды', kz: 'Іс-шара мердігерлерін секундта таңдау', en: 'Smart event-contractor matching in seconds' },
+            nav_search: { ru: 'Умный подбор', kz: 'Ақылды іздеу', en: 'Smart Match' },
+            nav_catalog: { ru: 'Каталог', kz: 'Каталог', en: 'Catalog' },
+            nav_advisor: { ru: 'ИИ-советник', kz: 'ЖИ-кеңесші', en: 'AI Advisor' },
+            nav_organizer: { ru: 'Организатор', kz: 'Ұйымдастырушы', en: 'Organizer' },
+            nav_shortlist: { ru: 'Шортлист', kz: 'Таңдаулылар', en: 'Shortlist' },
+            nav_budget: { ru: 'Бюджет', kz: 'Бюджет', en: 'Budget' },
+            hero_title: { ru: 'Найдите идеальных подрядчиков за 1 клик', kz: 'Идеал мердігерлерді 1 басу арқылы табыңыз', en: 'Find the perfect contractors in 1 click' },
+            hero_sub: { ru: 'Задайте параметры вашего мероприятия, и наш алгоритм подберет до 3 лучших проверенных специалистов, свободных в вашу дату.', kz: 'Іс-шараңыздың параметрлерін көрсетіңіз — алгоритм сол күнге бос үздік 3 маманды таңдап береді.', en: 'Set your event parameters and our algorithm will match up to 3 best verified specialists free on your date.' },
+            lbl_city: { ru: 'Город', kz: 'Қала', en: 'City' },
+            lbl_cat: { ru: 'Категория', kz: 'Санат', en: 'Category' },
+            lbl_format: { ru: 'Формат', kz: 'Формат', en: 'Format' },
+            lbl_date: { ru: 'Дата события', kz: 'Іс-шара күні', en: 'Event date' },
+            lbl_budget: { ru: 'Макс. бюджет', kz: 'Макс. бюджет', en: 'Max budget' },
+            btn_search: { ru: 'Подобрать топ-3 подрядчика', kz: 'Топ-3 мердігерді таңдау', en: 'Find top 3 contractors' },
+            results_title: { ru: 'Результаты умного подбора', kz: 'Ақылды іздеу нәтижелері', en: 'Smart match results' },
+            catalog_title: { ru: 'Каталог всех подрядчиков', kz: 'Барлық мердігерлер каталогы', en: 'Full contractor catalog' },
+            catalog_sub: { ru: 'Полный список из 66 профилей с фильтрацией по категориям и городам.', kz: '66 профильден тұратын толық тізім, санат және қала бойынша сүзгі.', en: 'Full list of 66 profiles, filterable by category and city.' },
+            filter_all: { ru: 'Все', kz: 'Барлығы', en: 'All' },
+            filter_host: { ru: 'Ведущие', kz: 'Жүргізушілер', en: 'Hosts' },
+            filter_photo: { ru: 'Фотографы', kz: 'Фотографтар', en: 'Photographers' },
+            filter_venue: { ru: 'Банкетные залы', kz: 'Банкет залдары', en: 'Venues' },
+            filter_band: { ru: 'Лайв-бэнды', kz: 'Лайв-топтар', en: 'Live bands' },
+            filter_florist: { ru: 'Флористы', kz: 'Флористер', en: 'Florists' },
+            shortlist_title: { ru: 'Шортлист и сравнение', kz: 'Таңдаулылар және салыстыру', en: 'Shortlist & comparison' },
+            shortlist_sub: { ru: 'Сравните выбранных подрядчиков по ключевым параметрам в удобной таблице.', kz: 'Таңдалған мердігерлерді негізгі параметрлер бойынша кестеде салыстырыңыз.', en: 'Compare your chosen contractors side by side.' },
+            btn_clear: { ru: 'Очистить шортлист', kz: 'Тізімді тазалау', en: 'Clear shortlist' },
+            shortlist_empty_title: { ru: 'Ваш шортлист пуст', kz: 'Тізіміңіз бос', en: 'Your shortlist is empty' },
+            shortlist_empty_sub: { ru: 'Добавляйте подрядчиков из поиска или каталога для сравнения.', kz: 'Салыстыру үшін іздеу немесе каталогтан мердігер қосыңыз.', en: 'Add contractors from search or the catalog to compare.' },
+            btn_goto_search: { ru: 'Перейти к подбору', kz: 'Іздеуге өту', en: 'Go to search' },
+            budget_title: { ru: 'Калькулятор бюджета мероприятия', kz: 'Іс-шара бюджет калькуляторы', en: 'Event budget calculator' },
+            budget_sub: { ru: 'Рассчитайте ориентировочную смету вашего ивента и распределите затраты по категориям.', kz: 'Іс-шараңыздың болжамды сметасын есептеп, шығынды санаттар бойынша бөліңіз.', en: 'Estimate your event budget and split spending across categories.' },
+            advisor_title: { ru: 'ИИ-советник по подрядчикам', kz: 'Мердігерлер бойынша ЖИ-кеңесші', en: 'AI contractor advisor' },
+            advisor_sub: { ru: 'Опишите ваше мероприятие своими словами — ИИ подберёт и объяснит лучшие варианты из каталога.', kz: 'Іс-шараңызды өз сөзіңізбен сипаттаңыз — ЖИ каталогтан үздік нұсқаларды таңдап, түсіндіреді.', en: 'Describe your event in your own words — the AI will pick and explain the best matches from the catalog.' },
+            advisor_placeholder: { ru: 'Например: свадьба в Алматы на 150 гостей в декабре, бюджет 3 млн, нужен ведущий на казахском и лайв-бэнд', kz: 'Мысалы: желтоқсанда Алматыда 150 қонаққа той, бюджет 3 млн, қазақша жүргізуші және лайв-топ керек', en: 'E.g.: wedding in Almaty for 150 guests in December, budget 3M, need a Kazakh-speaking host and a live band' },
+            advisor_ask: { ru: 'Спросить ИИ-советника', kz: 'ЖИ-кеңесшіден сұрау', en: 'Ask the AI advisor' },
+            organizer_title: { ru: 'Организатор мероприятия', kz: 'Іс-шара ұйымдастырушысы', en: 'Event organizer' },
+            organizer_sub: { ru: 'Чек-лист подготовки и обратный отсчёт до вашего события.', kz: 'Дайындық чек-парағы және іс-шараға дейінгі кері санақ.', en: 'Prep checklist and a countdown to your event.' },
+            organizer_days_left: { ru: 'дней до события', kz: 'іс-шараға дейін күн', en: 'days to go' },
+            organizer_progress: { ru: 'Прогресс подготовки', kz: 'Дайындық барысы', en: 'Prep progress' },
+            organizer_new_task: { ru: 'Добавить свою задачу...', kz: 'Өз тапсырмаңызды қосыңыз...', en: 'Add your own task...' },
+            contract_title: { ru: 'Договор / Техническое задание', kz: 'Келісімшарт / Техникалық тапсырма', en: 'Contract / Brief' },
+            btn_copy: { ru: 'Копировать', kz: 'Көшіру', en: 'Copy' },
+            btn_download: { ru: 'Скачать', kz: 'Жүктеу', en: 'Download' },
+            btn_share_wa: { ru: 'Поделиться в WhatsApp', kz: 'WhatsApp-қа бөлісу', en: 'Share on WhatsApp' },
+            btn_share_tg: { ru: 'Поделиться в Telegram', kz: 'Telegram-ға бөлісу', en: 'Share on Telegram' },
+            invite_phone_ph:{ru:'Телефон гостя (WhatsApp)',kz:'Қонақ телефоны (WhatsApp)',en:'Guest phone (WhatsApp)'}, invite_email_ph:{ru:'Email гостя',kz:'Қонақтың email мекенжайы',en:'Guest email'}, expense_name_ph:{ru:'Название расхода',kz:'Шығын атауы',en:'Expense name'}, expense_amount_ph:{ru:'Сумма ₸',kz:'Сома ₸',en:'Amount ₸'}, invite_names_ph:{ru:'Например: Айдана и Али',kz:'Мысалы: Айдана мен Әли',en:'e.g. Aidana and Ali'}, invite_place_ph:{ru:'Адрес / зал',kz:'Мекенжай / зал',en:'Address / venue'}, filter_city:{ru:'Город',kz:'Қала',en:'City'}, filter_category:{ru:'Категория',kz:'Санат',en:'Category'}, nav_services:{ru:'Сервисы',kz:'Сервистер',en:'Services'}, services_title:{ru:'Сервисы для вашего события',kz:'Іс-шараға арналған сервистер',en:'Event services'}, services_sub:{ru:'Площадки, отзывы гостей, план платежей, расходы и приглашения в одном месте.',kz:'Орындар, қонақ пікірлері, төлем жоспары, шығындар және шақыру билеттері бір жерде.',en:'Venues, guest reviews, payment planning, expenses and invitations in one place.'}, venues_title:{ru:'Банкетные залы и красивые места',kz:'Банкет залдары мен әдемі орындар',en:'Banquet halls and scenic places'}, venues_note:{ru:'Метки на карте используют координаты мест. Отзывы начинаются с демонстрационных данных.',kz:'Карта белгілері орындардың координаттарын қолданады. Пікірлер демо деректерден басталады.',en:'Map pins use the supplied coordinates. Reviews start with sample entries.'}, reviews_title:{ru:'Отзывы гостей',kz:'Қонақтардың пікірлері',en:'Guest reviews'}, reviews_note:{ru:'Примеры отзывов — не реальные клиентские отзывы.',kz:'Үлгі пікірлер — нақты клиенттердің пікірлері емес.',en:'Sample reviews, not real customer testimonials.'}, pay_title:{ru:'Оплата и рассрочка',kz:'Төлем және бөліп төлеу',en:'Payments and installments'}, pay_note:{ru:'Демо. Для Kaspi, Freedom и Halyk нужны официальные merchant/API подключения. Эта страница не принимает деньги.',kz:'Төлем демосы. Kaspi, Freedom және Halyk үшін ресми merchant/API келісімі қажет; бұл бет ақша алмайды.',en:'Demo only. Official merchant/API onboarding is required for Kaspi, Freedom and Halyk. This page does not collect money.'}, pay_amount:{ru:'Сумма (₸)',kz:'Сома (₸)',en:'Amount (₸)'}, pay_full:{ru:'Полная оплата',kz:'Толық төлем',en:'Pay in full'}, pay_demo_btn:{ru:'Показать демо оплаты',kz:'Төлемді демода көрсету',en:'Preview payment'}, books_title:{ru:'Учёт расходов',kz:'Шығындар есебі',en:'Expense tracker'}, books_note:{ru:'Записи хранятся в этом браузере; это не бухгалтерская или налоговая отчётность.',kz:'Жазбалар осы браузерде ғана сақталады; бұл бухгалтерлік/салық есебі емес.',en:'Entries stay in this browser; this is not accounting or tax reporting.'}, expense_add:{ru:'Добавить расход',kz:'Шығын қосу',en:'Add expense'}, invite_title:{ru:'Создать приглашение',kz:'Шақыру билетін жасау',en:'Create invitation'}, invite_sub:{ru:'Заполните данные и скачайте персональный текст приглашения.',kz:'Деректерді толтырып, жеке мәтіндік шақыруды жүктеңіз.',en:'Enter details and download a personalized invitation.'}, invite_btn:{ru:'Создать приглашение',kz:'Шақыруды жасау',en:'Create invitation'},
+            trust_badge: { ru: 'Подтверждённый специалист', kz: 'Расталған маман', en: 'Verified specialist' },
+        };
+
+        const CAT_MAP = {
+            'Ведущий': { kz: 'Жүргізуші', en: 'Host / MC' },
+            'Фотограф': { kz: 'Фотограф', en: 'Photographer' },
+            'Видеограф': { kz: 'Видеограф', en: 'Videographer' },
+            'Банкетный зал': { kz: 'Банкет залы', en: 'Banquet hall' },
+            'Лайв-бэнд': { kz: 'Лайв-топ', en: 'Live band' },
+            'Флорист': { kz: 'Флорист', en: 'Florist' },
+            'Декоратор': { kz: 'Декоратор', en: 'Decorator' },
+            'Ведущий церемонии': { kz: 'Салтанат жүргізушісі', en: 'Ceremony host' },
+            'Инструменталист': { kz: 'Аспапшы', en: 'Instrumentalist' },
+            'Фото и видеобудки': { kz: 'Фото/видео будка', en: 'Photo & video booth' },
+            'Национальный ансамбль': { kz: 'Ұлттық ансамбль', en: 'National ensemble' },
+            'Подарки и сувениры': { kz: 'Сыйлықтар', en: 'Gifts & souvenirs' },
+        };
+        const FORMAT_MAP = {
+            'свадьба': { kz: 'үйлену тойы', en: 'wedding' },
+            'корпоратив': { kz: 'корпоратив', en: 'corporate' },
+            'юбилей': { kz: 'мерейтой', en: 'anniversary' },
+            'той': { kz: 'той', en: 'toi' },
+            'конференция': { kz: 'конференция', en: 'conference' },
+            'день рождения': { kz: 'туған күн', en: 'birthday' },
+        };
+        const LANG_MAP = {
+            'казахский': { kz: 'қазақша', en: 'Kazakh' },
+            'русский': { kz: 'орысша', en: 'Russian' },
+            'английский': { kz: 'ағылшынша', en: 'English' },
+        };
+        const CITY_MAP = {
+            'Алматы': { kz: 'Алматы', en: 'Almaty' },
+            'Астана': { kz: 'Астана', en: 'Astana' },
+            'Зарубежье': { kz: 'Шетел', en: 'Abroad' },
+            'Шымкент': { ru: 'Шымкент', kz: 'Шымкент', en: 'Shymkent' },
+        };
+        const BUDGET_OPT_MAP = {
+            '300000': { ru: 'до 300 000 ₸', kz: '300 000 ₸ дейін', en: 'up to 300,000 ₸' },
+            '600000': { ru: 'до 600 000 ₸', kz: '600 000 ₸ дейін', en: 'up to 600,000 ₸' },
+            '1000000': { ru: 'до 1 000 000 ₸', kz: '1 000 000 ₸ дейін', en: 'up to 1,000,000 ₸' },
+            '2000000': { ru: 'до 2 000 000 ₸', kz: '2 000 000 ₸ дейін', en: 'up to 2,000,000 ₸' },
+            '10000000': { ru: 'Без лимита', kz: 'Шексіз', en: 'No limit' },
+        };
+        const TOAST_MAP = {
+            added: { ru: 'добавлен в шортлист!', kz: 'тізімге қосылды!', en: 'added to shortlist!' },
+            removed: { ru: 'удален из шортлиста', kz: 'тізімнен өшірілді', en: 'removed from shortlist' },
+            cleared: { ru: 'Шортлист очищен', kz: 'Тізім тазаланды', en: 'Shortlist cleared' },
+        };
+
+        function trCat(v) { return (v && CAT_MAP[v] && CAT_MAP[v][currentLang]) || v; }
+        function trFormat(v) { return (v && FORMAT_MAP[v] && FORMAT_MAP[v][currentLang]) || v; }
+        function trLang(v) { return (v && LANG_MAP[v] && LANG_MAP[v][currentLang]) || v; }
+        function trCity(v) { return (v && CITY_MAP[v] && CITY_MAP[v][currentLang]) || v; }
+
+        const TRUST_KEYWORDS = ['топ', 'top', 'финалист', 'победитель', 'resident', 'резидент', 'of the year', '№1', 'лучш', 'best'];
+        function hasTrustBadge(desc) {
+            const d = (desc || '').toLowerCase();
+            return TRUST_KEYWORDS.some(k => d.includes(k));
+        }
+        function trustBadgeHtml() {
+            return `<div class="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 mb-1.5"><i class="fa-solid fa-award"></i>${UI_STRINGS.trust_badge[currentLang]}</div>`;
+        }
+
+        // ---------- Contract / Brief generator ----------
+        let currentContractText = '';
+        function generateContract(id) {
+            const c = contractorsData.find(x => x.id === id);
+            if (!c) return;
+            const dateStr = (document.getElementById('search-date') && document.getElementById('search-date').value) || '____';
+            const city = (document.getElementById('search-city') && document.getElementById('search-city').value) || c.city;
+            const T = {
+                ru: `ТЕХНИЧЕСКОЕ ЗАДАНИЕ / БРИФ НА УСЛУГИ\n\nИсполнитель: ${c.name}\nКатегория услуг: ${trCat(c.category)}\nID профиля: ${c.id}\nГород оказания услуг: ${trCity(city)}\nДата мероприятия: ${dateStr}\nПродолжительность: ${c.maxHours}\nСтоимость услуг: ${c.price.toLocaleString()} ₸\nЯзыки: ${c.languages.map(trLang).join(', ')}\nФорматы: ${c.formats.map(trFormat).join(', ')}\n\nОписание услуг:\n${c.desc}\n\nУсловия: стороны согласовывают детали мероприятия, порядок предоплаты и окончательный расчёт отдельно. Документ сформирован автоматически платформой Firebird и требует юридической проверки перед подписанием.`,
+                kz: `ҚЫЗМЕТ КӨРСЕТУГЕ ТЕХНИКАЛЫҚ ТАПСЫРМА / БРИФ\n\nОрындаушы: ${c.name}\nҚызмет санаты: ${trCat(c.category)}\nПрофиль ID: ${c.id}\nҚала: ${trCity(city)}\nІс-шара күні: ${dateStr}\nҰзақтығы: ${c.maxHours}\nҚұны: ${c.price.toLocaleString()} ₸\nТілдер: ${c.languages.map(trLang).join(', ')}\nФорматтар: ${c.formats.map(trFormat).join(', ')}\n\nСипаттама:\n${c.desc}\n\nШарттар: тараптар іс-шара егжей-тегжейін, алдын ала төлем мен түпкілікті есеп айырысу тәртібін бөлек келіседі. Құжат Firebird платформасында автоматты түрде жасалды, қол қоюдан бұрын заңгерлік тексеруді қажет етеді.`,
+                en: `SERVICE BRIEF / CONTRACT DRAFT\n\nContractor: ${c.name}\nCategory: ${trCat(c.category)}\nProfile ID: ${c.id}\nCity: ${trCity(city)}\nEvent date: ${dateStr}\nDuration: ${c.maxHours}\nPrice: ${c.price.toLocaleString()} ₸\nLanguages: ${c.languages.map(trLang).join(', ')}\nFormats: ${c.formats.map(trFormat).join(', ')}\n\nDescription:\n${c.desc}\n\nTerms: both parties will agree on event details, deposit and final payment separately. Auto-generated by the Firebird platform and requires legal review before signing.`
+            };
+            currentContractText = T[currentLang] || T.ru;
+            document.getElementById('contract-text').textContent = currentContractText;
+            document.getElementById('contract-modal').classList.remove('hidden');
+            document.getElementById('contract-modal').classList.add('flex');
+        }
+        function closeContractModal() {
+            document.getElementById('contract-modal').classList.add('hidden');
+            document.getElementById('contract-modal').classList.remove('flex');
+        }
+        async function copyContract() {
+            try { await navigator.clipboard.writeText(currentContractText); showToast({ ru: 'Скопировано!', kz: 'Көшірілді!', en: 'Copied!' }[currentLang]); } catch (e) {}
+        }
+        async function downloadContract() {
+            try {
+                const downloads = await claude.use('downloads');
+                if (downloads) { await downloads.save({ filename: 'contract.txt', data: currentContractText }); return; }
+            } catch (e) {}
+            try {
+                const blob = new Blob([currentContractText], { type: 'text/plain' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'contract.txt';
+                a.click();
+            } catch (e) {}
+        }
+
+        // ---------- Share shortlist ----------
+        function buildShareText() {
+            const title = { ru: 'Мой шортлист подрядчиков (Firebird):', kz: 'Менің мердігерлер тізімім (Firebird):', en: 'My contractor shortlist (Firebird):' }[currentLang];
+            const lines = shortlist.map(c => `• ${c.name} (${trCat(c.category)}) — ${c.price.toLocaleString()} ₸`);
+            return `${title}\n${lines.join('\n')}\n${location.href}`;
+        }
+        function shareWhatsApp() {
+            if (!shortlist.length) return;
+            window.open('https://wa.me/?text=' + encodeURIComponent(buildShareText()), '_blank');
+        }
+        function shareTelegram() {
+            if (!shortlist.length) return;
+            window.open('https://t.me/share/url?url=' + encodeURIComponent(location.href) + '&text=' + encodeURIComponent(buildShareText()), '_blank');
+        }
+
+        function setLanguage(lang) {
+            currentLang = lang;
+            document.documentElement.lang = lang === 'kz' ? 'kk' : lang;
+            try { localStorage.setItem('fb_lang', lang); } catch (e) {}
+            document.querySelectorAll('.lang-btn').forEach(b => {
+                const active = b.getAttribute('onclick') === `setLanguage('${lang}')`;
+                b.className = 'lang-btn px-2.5 py-1 text-xs font-bold rounded-md transition-all ' + (active ? 'bg-white text-stone-900 shadow-sm' : 'text-stone-500 hover:text-stone-800');
+            });
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                if (UI_STRINGS[key]) el.textContent = UI_STRINGS[key][lang] || UI_STRINGS[key].ru;
+            });
+            document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+                const key = el.getAttribute('data-i18n-ph');
+                if (UI_STRINGS[key]) el.setAttribute('placeholder', UI_STRINGS[key][lang] || UI_STRINGS[key].ru);
+            });
+            // (catalog re-render uses currentCatalogFilter, declared later; safe due to hoisting)
+            const catSel = document.getElementById('search-cat');
+            if (catSel) Array.from(catSel.options).forEach(o => { o.textContent = trCat(o.value); });
+            const citySel = document.getElementById('search-city');
+            if (citySel) Array.from(citySel.options).forEach(o => { o.textContent = trCity(o.value); });
+            const formatSel = document.getElementById('search-format');
+            if (formatSel) Array.from(formatSel.options).forEach(o => { o.textContent = trFormat(o.value); });
+            const budgetSel = document.getElementById('search-budget');
+            if (budgetSel) Array.from(budgetSel.options).forEach(o => {
+                if (BUDGET_OPT_MAP[o.value]) o.textContent = BUDGET_OPT_MAP[o.value][lang] || BUDGET_OPT_MAP[o.value].ru;
+            });
+            // Re-render dynamic content so category/format/language labels refresh too
+            if (document.getElementById('tab-search').classList.contains('active')) runSmartMatch();
+            renderFullCatalog(typeof currentCatalogFilter !== 'undefined' ? currentCatalogFilter : '__all__');
+            if (document.getElementById('tab-shortlist').classList.contains('active')) renderShortlist();
+            if (document.getElementById('tab-budget').classList.contains('active')) updateBudgetCalc();
+            if (document.getElementById('tab-organizer').classList.contains('active')) renderOrganizer();
+            if (lastAdvisorRes) renderAdvisorResult(lastAdvisorRes);
+            if (document.getElementById('tab-services').classList.contains('active')) renderServices();
+        }
+
+        // ---------- AI Advisor ----------
+        async function askAdvisor() {
+            const promptText = document.getElementById('advisor-input').value.trim();
+            const resultBox = document.getElementById('advisor-result');
+            const btn = document.getElementById('advisor-ask-btn');
+            if (!promptText) return;
+            btn.disabled = true;
+            const q = promptText.toLowerCase();
+            const city = /астан|astana/.test(q) ? 'Астана' : /алмат|almaty/.test(q) ? 'Алматы' : document.getElementById('search-city').value;
+            const budgetMatch = q.match(/(\d+(?:[.,]\d+)?)\s*(млн|million|тыс|k)?/i);
+            let budget = Number(document.getElementById('search-budget').value);
+            if (budgetMatch) { let n=Number(budgetMatch[1].replace(',','.')); budget=Math.min(10000000,Math.round(n*(/млн|million/i.test(budgetMatch[2]||'')?1000000:/тыс|k/i.test(budgetMatch[2]||'')?1000:1))); }
+            const format = /той|to[iy]/i.test(q) ? 'той' : /корпор|corporat/i.test(q) ? 'корпоратив' : /юбиле|anniversary/i.test(q) ? 'юбилей' : /день рожден|birthday/i.test(q) ? 'день рождения' : 'свадьба';
+            const langNeed = /қазақ|казах|kazakh/i.test(q) ? 'казахский' : /ағылшын|англ|english/i.test(q) ? 'английский' : null;
+            const terms = [['ведущ','ведущий'],['фото','Фотограф'],['видео','Видеограф'],['декор','Декоратор'],['цвет','Флорист'],['зал','Банкетный зал'],['venue','Банкетный зал'],['музык','Лайв-бэнд'],['band','Лайв-бэнд']];
+            let wanted = terms.find(([t])=>q.includes(t))?.[1] || document.getElementById('search-cat').value;
+            const scored = contractorsData.map(c=>{
+              let score=0; if(c.city===city) score+=24; if(c.category===wanted||c.category.includes(wanted)) score+=30; if(c.formats.includes(format)) score+=16; if(c.price<=budget) score+=20; if(langNeed&&c.languages.includes(langNeed)) score+=12; score+=Math.max(0,10-Math.round(c.busyDaysCount/10));
+              return {c,score};
+            }).sort((a,b)=>b.score-a.score).slice(0,4);
+            const summary = {
+              ru:`Для ${trFormat(format)} в ${trCity(city)} с лимитом около ${budget.toLocaleString()} ₸ подобрал варианты по городу, формату, цене и занятости. Наличие на дату и итоговую цену нужно подтвердить у подрядчика.`,
+              kz:`${trCity(city)} қаласындағы ${trFormat(format)} үшін қала, формат, баға және жүктемені ескеріп нұсқалар таңдадым. Күннің бос екенін және соңғы бағаны мердігерден нақтылаңыз.`,
+              en:`I ranked options for a ${trFormat(format)} in ${trCity(city)} by city, format, budget and workload. Confirm date availability and final pricing directly with each provider.`}[currentLang];
+            lastAdvisorRes={picks:scored.map(({c})=>({id:c.id,reason:{ru:`${trCity(c.city)}, ${c.price.toLocaleString()} ₸; ${trFormat(format)} форматына сәйкестігі мен бюджет ескерілді.`,kz:`${trCity(c.city)}, ${c.price.toLocaleString()} ₸; формат пен бюджет ескерілді.`,en:`Based in ${trCity(c.city)}, priced at ${c.price.toLocaleString()} ₸; matched against format and budget.`}[currentLang]})),summary};
+            renderAdvisorResult(lastAdvisorRes);
+            btn.disabled=false;
+        }
+
+        function renderAdvisorResult(res) {
+            const resultBox = document.getElementById('advisor-result');
+            if (!res || !res.picks || !res.picks.length) {
+                resultBox.innerHTML = '';
+                return;
+            }
+            let html = `<div class="bg-violet-50 border border-violet-100 rounded-2xl p-4 text-sm text-violet-900">${res.summary || ''}</div>`;
+            html += '<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">';
+            res.picks.forEach(p => {
+                const c = contractorsData.find(x => x.id === p.id);
+                if (!c) return;
+                const inShort = shortlist.some(s => s.id === c.id);
+                html += `
+                    <div class="bg-white border border-stone-200 rounded-2xl p-4 shadow-sm">
+                        <div class="text-[11px] font-bold text-violet-600 uppercase tracking-wider">${trCat(c.category)}</div>
+                        <div class="font-bold text-stone-900">${c.name}</div>
+                        <div class="text-xs text-stone-500 mb-2">${trCity(c.city)} · ${c.price.toLocaleString()} ₸</div>
+                        <p class="text-xs text-stone-600 mb-3">${p.reason || ''}</p>
+                        <button onclick="toggleShortlist('${c.id}'); renderAdvisorResult(lastAdvisorRes)" class="text-xs font-semibold px-3 py-1.5 rounded-lg ${inShort ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-stone-900 hover:bg-stone-800 text-white'}">
+                            <i class="fa-solid ${inShort ? 'fa-heart text-rose-500' : 'fa-heart'} mr-1"></i>${inShort ? 'В шортлисте' : 'В шортлист'}
+                        </button>
+                    </div>`;
+            });
+            html += '</div>';
+            resultBox.innerHTML = html;
+        }
+
+        // ---------- Event Organizer ----------
+        const DEFAULT_TASKS = [
+            { key: 'venue', ru: 'Забронировать площадку', kz: 'Орынды брондау', en: 'Book the venue' },
+            { key: 'menu', ru: 'Согласовать меню и кейтеринг', kz: 'Мәзір мен кейтерингті келісу', en: 'Confirm menu & catering' },
+            { key: 'invites', ru: 'Разослать приглашения гостям', kz: 'Қонақтарға шақыру жіберу', en: 'Send guest invitations' },
+            { key: 'contract', ru: 'Подписать договоры с подрядчиками', kz: 'Мердігерлермен келісімшарт жасау', en: 'Sign contractor agreements' },
+            { key: 'deposit', ru: 'Внести предоплату подрядчикам', kz: 'Мердігерлерге алдын ала төлем жасау', en: 'Pay contractor deposits' },
+            { key: 'timeline', ru: 'Составить тайминг мероприятия', kz: 'Іс-шара таймингін жасау', en: 'Create event timeline' },
+            { key: 'decor', ru: 'Утвердить декор и рассадку', kz: 'Декор мен орналасуды бекіту', en: 'Approve decor & seating' },
+            { key: 'final', ru: 'Финальный созвон со всеми подрядчиками', kz: 'Барлық мердігерлермен соңғы байланыс', en: 'Final call with all contractors' },
+        ];
+        let organizerTasks = [];
+
+        function loadOrganizer() {
+            try {
+                const saved = JSON.parse(localStorage.getItem('fb_organizer_tasks') || 'null');
+                organizerTasks = saved && saved.length ? saved : DEFAULT_TASKS.map(t => ({ ...t, custom: false, done: false }));
+            } catch (e) {
+                organizerTasks = DEFAULT_TASKS.map(t => ({ ...t, custom: false, done: false }));
+            }
+        }
+        function saveOrganizer() {
+            try { localStorage.setItem('fb_organizer_tasks', JSON.stringify(organizerTasks)); } catch (e) {}
+        }
+        function toggleTask(idx) { organizerTasks[idx].done = !organizerTasks[idx].done; saveOrganizer(); renderOrganizer(); }
+        function removeTask(idx) { organizerTasks.splice(idx, 1); saveOrganizer(); renderOrganizer(); }
+        function addCustomTask() {
+            const input = document.getElementById('organizer-new-task');
+            const val = input.value.trim();
+            if (!val) return;
+            organizerTasks.push({ key: 'c' + Date.now(), ru: val, kz: val, en: val, custom: true, done: false });
+            input.value = '';
+            saveOrganizer();
+            renderOrganizer();
+        }
+        function renderOrganizer() {
+            const list = document.getElementById('organizer-list');
+            if (!list) return;
+            const done = organizerTasks.filter(t => t.done).length;
+            const total = organizerTasks.length;
+            document.getElementById('organizer-progress-text').textContent = `${done}/${total}`;
+            document.getElementById('organizer-progress-bar').style.width = (total ? (done / total * 100) : 0) + '%';
+            list.innerHTML = organizerTasks.map((t, i) => `
+                <div class="flex items-center justify-between bg-stone-50 border border-stone-200 rounded-xl px-4 py-3">
+                    <label class="flex items-center space-x-3 cursor-pointer flex-grow">
+                        <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleTask(${i})" class="w-4 h-4 accent-sky-500">
+                        <span class="text-sm ${t.done ? 'line-through text-stone-400' : 'text-stone-800'}">${t[currentLang] || t.ru}</span>
+                    </label>
+                    ${t.custom ? `<button onclick="removeTask(${i})" class="text-stone-300 hover:text-rose-500 text-xs px-2"><i class="fa-solid fa-xmark"></i></button>` : ''}
+                </div>`).join('');
+            const dateStr = document.getElementById('search-date') ? document.getElementById('search-date').value : '';
+            const daysEl = document.getElementById('organizer-days-left');
+            if (dateStr && daysEl) {
+                const diff = Math.ceil((new Date(dateStr) - new Date()) / 86400000);
+                daysEl.textContent = diff >= 0 ? diff : 0;
+            }
+        }
+
+        // Tab Switching
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.getElementById('tab-' + tabId).classList.add('active');
+
+            // Navigation styles
+            ['search', 'catalog', 'advisor', 'organizer', 'shortlist', 'budget', 'services'].forEach(id => {
+                const btn = document.getElementById('nav-' + id);
+                if (btn) {
+                    if (id === tabId) {
+                        btn.className = "px-3 py-2 text-sm font-medium rounded-lg transition-all bg-white text-stone-900 shadow-sm";
+                    } else {
+                        btn.className = "px-3 py-2 text-sm font-medium rounded-lg transition-all text-stone-600 hover:text-stone-900";
+                    }
+                }
+            });
+
+            if (tabId === 'shortlist') renderShortlist();
+            if (tabId === 'budget') updateBudgetCalc();
+            if (tabId === 'services') renderServices();
+            if (tabId === 'organizer') { loadOrganizer(); renderOrganizer(); }
+        }
+
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobile-menu');
+            menu.classList.toggle('hidden');
+        }
+
+        // Toast Notification
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').textContent = msg;
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+
+        // Smart Match Logic
+        function runSmartMatch() {
+            const city = document.getElementById('search-city').value;
+            const category = document.getElementById('search-cat').value;
+            const format = document.getElementById('search-format').value;
+            const maxBudget = parseInt(document.getElementById('search-budget').value);
+            const dateStr = document.getElementById('search-date').value;
+
+            // Check if December for special weighting
+            const isDecember = dateStr.includes('-12-');
+
+            // Filter
+            let matches = contractorsData.filter(c => {
+                const matchCity = c.city === city || c.city === 'Зарубежье';
+                const matchCat = c.category.toLowerCase().includes(category.toLowerCase()) || category.toLowerCase().includes(c.category.toLowerCase());
+                const matchFormat = c.formats.includes(format);
+                const matchBudget = c.price <= maxBudget;
+                return matchCity && matchCat && matchFormat && matchBudget;
+            });
+
+            // If strict filters return less than 3, loosen budget slightly or format
+            if (matches.length < 3) {
+                const relaxed = contractorsData.filter(c => {
+                    return (c.city === city || c.city === 'Зарубежье') && (c.category.toLowerCase().includes(category.toLowerCase()) || category.toLowerCase().includes(c.category.toLowerCase()));
+                });
+                // Merge without duplicates
+                for (let item of relaxed) {
+                    if (!matches.some(m => m.id === item.id)) {
+                        matches.push(item);
+                    }
+                }
+            }
+
+            // Score and sort
+            matches.sort((a, b) => {
+                let scoreA = 0;
+                let scoreB = 0;
+                if (a.price <= maxBudget) scoreA += 30;
+                if (b.price <= maxBudget) scoreB += 30;
+                if (isDecember) {
+                    scoreA -= a.decBusy; // prefer less busy in Dec
+                    scoreB -= b.decBusy;
+                } else {
+                    scoreA -= a.busyDaysCount;
+                    scoreB -= b.busyDaysCount;
+                }
+                return scoreB - scoreA;
+            });
+
+            const top3 = matches.slice(0, 3);
+            renderMatchResults(top3, { city, category, format, maxBudget, dateStr });
+        }
+
+        function renderMatchResults(results, params) {
+            const container = document.getElementById('match-cards-container');
+            const meta = document.getElementById('results-meta');
+            meta.textContent = `${{ru:'Найдено лучших совпадений',kz:'Табылған үздік сәйкестік',en:'Best matches found'}[currentLang]}: ${results.length}`;
+
+            if (results.length === 0) {
+                container.innerHTML = `
+                    <div class="col-span-3 bg-white p-12 rounded-2xl text-center border border-stone-200">
+                        <i class="fa-solid fa-triangle-exclamation text-3xl text-orange-500 mb-3"></i>
+                        <h4 class="font-bold text-stone-800 text-lg">По вашему запросу точных подрядчиков не найдено</h4>
+                        <p class="text-stone-500 text-sm mt-1">Попробуйте увеличить максимальный бюджет или выбрать другой формат/город.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = '';
+            results.forEach((c, index) => {
+                const isShortlisted = shortlist.some(item => item.id === c.id);
+                const explanation = generateExplanation(c, params, index);
+
+                const card = document.createElement('div');
+                card.className = `bg-white rounded-2xl border ${index === 0 ? 'border-orange-500 ring-2 ring-orange-500/20 shadow-lg' : 'border-stone-200 shadow-sm'} p-6 flex flex-col justify-between relative`;
+                
+                card.innerHTML = `
+                    <div>
+                        ${index === 0 ? '<span class="absolute -top-3 left-6 bg-gradient-to-r from-orange-500 to-amber-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider shadow-sm"><i class="fa-solid fa-crown mr-1"></i>Лучший выбор №1</span>' : ''}
+                        
+                        <div class="flex items-start justify-between mb-3 mt-1">
+                            <div>
+                                <span class="text-xs font-semibold text-orange-600 uppercase tracking-wider">${trCat(c.category)}</span>
+                                <h4 class="text-lg font-bold text-stone-900 mt-0.5">${c.name} <span class="text-xs font-normal text-stone-400">(${c.id})</span></h4>
+                                ${hasTrustBadge(c.desc) ? trustBadgeHtml() : ''}
+                            </div>
+                            <span class="text-xs px-2.5 py-1 bg-stone-100 text-stone-700 rounded-lg font-medium">${trCity(c.city)}</span>
+                        </div>
+
+                        <div class="text-2xl font-black text-stone-900 mb-3">
+                            ${c.price.toLocaleString()} ₸ ${c.priceImputed ? '<span class="text-xs font-normal text-stone-400" title="Цена скорректирована при подготовке датасета">*</span>' : ''}
+                        </div>
+
+                        <!-- Specific Explanation Box -->
+                        <div class="bg-orange-50/70 border border-orange-100 rounded-xl p-3.5 mb-4 text-xs text-orange-900 space-y-1">
+                            <p class="font-bold flex items-center text-orange-800"><i class="fa-solid fa-circle-info mr-1.5 text-orange-500"></i>Почему подходит:</p>
+                            <p class="leading-relaxed">${explanation}</p>
+                        </div>
+
+                        <div class="text-xs text-stone-600 space-y-1 mb-4 bg-stone-50 p-3 rounded-xl border border-stone-100">
+                            <div><strong class="text-stone-700">${UI_STRINGS.lbl_format[currentLang]}:</strong> ${c.formats.map(trFormat).join(', ')}</div>
+                            <div><strong class="text-stone-700">${{ru:'Языки',kz:'Тілдер',en:'Languages'}[currentLang]}:</strong> ${c.languages.map(trLang).join(', ')}</div>
+                            <div><strong class="text-stone-700">Занятость:</strong> ${c.busyDaysCount} из 100 дней</div>
+                        </div>
+
+                        <p class="text-xs text-stone-500 line-clamp-3 mb-4">${c.desc}</p>
+                    </div>
+
+                    <div class="flex items-center space-x-2 pt-4 border-t border-stone-100">
+                        <button onclick="toggleShortlist('${c.id}')" class="flex-grow py-2.5 px-4 rounded-xl text-xs font-semibold transition-all flex items-center justify-center space-x-2 ${isShortlisted ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-stone-900 hover:bg-stone-800 text-white'}">
+                            <i class="fa-solid ${isShortlisted ? 'fa-heart text-rose-500' : 'fa-heart-pulse'}"></i>
+                            <span>${isShortlisted ? {ru:'В шортлисте',kz:'Тізімде',en:'In shortlist'}[currentLang] : {ru:'В шортлист',kz:'Тізімге қосу',en:'Add to shortlist'}[currentLang]}</span>
+                        </button>
+                        <button onclick="generateContract('${c.id}')" title="${UI_STRINGS.contract_title[currentLang]}" class="py-2.5 px-3.5 rounded-xl text-xs font-semibold bg-stone-100 hover:bg-stone-200 text-stone-700"><i class="fa-solid fa-file-contract"></i></button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        }
+
+        function generateExplanation(c, params, index) {
+            const L = {
+                loc: { ru: `базируется в г. ${trCity(params.city)} и идеально подходит по локации.`, kz: `${trCity(params.city)} қаласында орналасқан, локация бойынша тамаша сәйкес келеді.`, en: `is based in ${trCity(params.city)}, a great location match.` },
+                price: { ru: `стоимость услуг (${c.price.toLocaleString()} ₸) укладывается в заданный лимит до ${params.maxBudget.toLocaleString()} ₸.`, kz: `қызмет құны (${c.price.toLocaleString()} ₸) сіз көрсеткен ${params.maxBudget.toLocaleString()} ₸ лимитіне сәйкес келеді.`, en: `the price (${c.price.toLocaleString()} ₸) fits your budget of up to ${params.maxBudget.toLocaleString()} ₸.` },
+                fmt: { ru: `официально специализируется на формате «${trFormat(params.format)}».`, kz: `«${trFormat(params.format)}» форматына мамандандырылған.`, en: `specializes in the "${trFormat(params.format)}" format.` },
+                free: { ru: `имеет свободные окна в плотном графике декабря (${c.decBusy} из 31 дня).`, kz: `желтоқсанның тығыз кестесінде бос уақыты бар (31 күннің ${c.decBusy}).`, en: `has open slots in December's busy schedule (${c.decBusy} of 31 days).` },
+                rating: { ru: `высокий рейтинг в категории и отличные отзывы клиентов.`, kz: `санат бойынша жоғары рейтинг және клиенттердің тамаша пікірлері.`, en: `has a high category rating and great client reviews.` },
+            };
+            let parts = [];
+            if (c.city === params.city) parts.push(L.loc[currentLang]);
+            if (c.price <= params.maxBudget) parts.push(L.price[currentLang]);
+            if (c.formats.includes(params.format)) parts.push(L.fmt[currentLang]);
+            parts.push(c.decBusy < 25 ? L.free[currentLang] : L.rating[currentLang]);
+            return parts.join(' ');
+        }
+
+        // Full Catalog Rendering & Filtering
+        function renderFullCatalog(catFilter = '__all__') {
+            const grid = document.getElementById('full-catalog-grid');
+            grid.innerHTML = '';
+
+            const filtered = catFilter === '__all__' ? contractorsData : contractorsData.filter(c => c.category.toLowerCase().includes(catFilter.toLowerCase()));
+            document.getElementById('total-count').textContent = contractorsData.length;
+
+            filtered.forEach(c => {
+                const isShortlisted = shortlist.some(item => item.id === c.id);
+                const card = document.createElement('article');
+                card.className = "bg-white border border-stone-200 rounded-2xl overflow-hidden shadow-sm flex flex-col justify-between p-5";
+                
+                card.innerHTML = `
+                    <div>
+                        <div class="flex items-start justify-between mb-2">
+                            <span class="text-[11px] font-bold uppercase tracking-wider text-orange-600">${trCat(c.category)}</span>
+                            <span class="text-[11px] text-stone-400 font-mono">${c.id}</span>
+                        </div>
+                        <h3 class="text-base font-bold text-stone-900 mb-1">${c.name}</h3>
+                        ${hasTrustBadge(c.desc) ? trustBadgeHtml() : ''}
+                        <div class="text-xs font-medium text-stone-600 mb-3">${trCity(c.city)} · <strong class="text-stone-900">${c.price.toLocaleString()} ₸</strong> ${c.priceImputed ? '<span class="text-xs text-stone-400">*</span>' : ''}</div>
+                        
+                        <div class="text-[11px] text-stone-600 bg-stone-50 border border-stone-200/60 rounded-xl p-2.5 space-y-1 mb-3">
+                            <div><strong>${UI_STRINGS.lbl_format[currentLang]}:</strong> ${c.formats.map(trFormat).join(', ')}</div>
+                            <div><strong>${{ru:'Языки',kz:'Тілдер',en:'Languages'}[currentLang]}:</strong> ${c.languages.map(trLang).join(', ')}</div>
+                            <div><strong>Занято:</strong> ${c.busyDaysCount} из 100 дней (дек: ${c.decBusy}/31)</div>
+                        </div>
+                        <p class="text-xs text-stone-500 line-clamp-2 mb-4">${c.desc}</p>
+                    </div>
+                    <div class="pt-3 border-t border-stone-100 flex items-center justify-between gap-2">
+                        <span class="text-[10px] text-stone-400">Макс: ${c.maxHours}</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="generateContract('${c.id}')" title="${UI_STRINGS.contract_title[currentLang]}" class="px-2.5 py-1.5 rounded-lg text-xs bg-stone-100 hover:bg-stone-200 text-stone-700"><i class="fa-solid fa-file-contract"></i></button>
+                            <button onclick="toggleShortlist('${c.id}')" class="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${isShortlisted ? 'bg-rose-50 text-rose-600 border border-rose-200' : 'bg-stone-100 hover:bg-stone-200 text-stone-800'}">
+                                <i class="fa-solid ${isShortlisted ? 'fa-heart text-rose-500' : 'fa-heart'} mr-1"></i>${isShortlisted ? {ru:'В шортлисте',kz:'Тізімде',en:'In shortlist'}[currentLang] : {ru:'В шортлист',kz:'Тізімге қосу',en:'Add to shortlist'}[currentLang]}
+                            </button>
+                        </div>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        let currentCatalogFilter = '__all__';
+        function filterCatalog(cat) {
+            currentCatalogFilter = cat;
+            document.querySelectorAll('.cat-filter-btn').forEach(btn => {
+                btn.className = "cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-100 text-stone-700 hover:bg-stone-200 transition-all";
+            });
+            event.target.className = "cat-filter-btn px-3.5 py-1.5 text-xs font-semibold rounded-full bg-stone-900 text-white transition-all";
+            renderFullCatalog(cat);
+        }
+
+        // Shortlist & Comparison Logic
+        function toggleShortlist(id) {
+            const item = contractorsData.find(c => c.id === id);
+            const index = shortlist.findIndex(c => c.id === id);
+            
+            if (index > -1) {
+                shortlist.splice(index, 1);
+                showToast(`${item.name} ${TOAST_MAP.removed[currentLang]}`);
+            } else {
+                shortlist.push(item);
+                showToast(`${item.name} ${TOAST_MAP.added[currentLang]}`);
+            }
+
+            updateShortlistBadge();
+            // Re-render current active tab if needed
+            if (document.getElementById('tab-catalog').classList.contains('active')) {
+                renderFullCatalog();
+            }
+            if (document.getElementById('tab-search').classList.contains('active')) {
+                // Keep search results as is or refresh
+            }
+            if (document.getElementById('tab-shortlist').classList.contains('active')) {
+                renderShortlist();
+            }
+        }
+
+        function updateShortlistBadge() {
+            const badge = document.getElementById('shortlist-badge');
+            if (shortlist.length > 0) {
+                badge.textContent = shortlist.length;
+                badge.classList.remove('hidden');
+            } else {
+                badge.classList.add('hidden');
+            }
+        }
+
+        function clearShortlist() {
+            shortlist = [];
+            updateShortlistBadge();
+            renderShortlist();
+            renderFullCatalog();
+            showToast(TOAST_MAP.cleared[currentLang]);
+        }
+
+        function renderShortlist() {
+            const emptyEl = document.getElementById('shortlist-empty');
+            const contentEl = document.getElementById('shortlist-content');
+            const table = document.getElementById('comparison-table');
+
+            if (shortlist.length === 0) {
+                emptyEl.classList.remove('hidden');
+                contentEl.classList.add('hidden');
+                return;
+            }
+
+            emptyEl.classList.add('hidden');
+            contentEl.classList.remove('hidden');
+
+            let html = `
+                <thead>
+                    <tr class="bg-stone-50 border-b border-stone-200 text-xs text-stone-500 uppercase">
+                        <th class="p-4 font-semibold">Параметр</th>
+                        ${shortlist.map(c => `
+                            <th class="p-4 font-semibold text-stone-900">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="text-[10px] text-orange-600 uppercase">${trCat(c.category)}</div>
+                                        <div class="text-sm font-bold">${c.name}</div>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <button onclick="generateContract('${c.id}')" class="text-stone-400 hover:text-orange-500"><i class="fa-solid fa-file-contract"></i></button>
+                                        <button onclick="toggleShortlist('${c.id}'); renderShortlist();" class="text-stone-400 hover:text-rose-500"><i class="fa-solid fa-xmark"></i></button>
+                                    </div>
+                                </div>
+                            </th>
+                        `).join('')}
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-stone-200 text-xs text-stone-700">
+                    <tr>
+                        <td class="p-4 font-semibold text-stone-500 bg-stone-50">Город / Цена</td>
+                        ${shortlist.map(c => `<td class="p-4 font-bold text-stone-900">${trCity(c.city)} · ${c.price.toLocaleString()} ₸</td>`).join('')}
+                    </tr>
+                    <tr>
+                        <td class="p-4 font-semibold text-stone-500 bg-stone-50">Форматы</td>
+                        ${shortlist.map(c => `<td class="p-4">${c.formats.map(trFormat).join(', ')}</td>`).join('')}
+                    </tr>
+                    <tr>
+                        <td class="p-4 font-semibold text-stone-500 bg-stone-50">Языки ведения</td>
+                        ${shortlist.map(c => `<td class="p-4">${c.languages.map(trLang).join(', ')}</td>`).join('')}
+                    </tr>
+                    <tr>
+                        <td class="p-4 font-semibold text-stone-500 bg-stone-50">Занятость (всего / дек)</td>
+                        ${shortlist.map(c => `<td class="p-4">${c.busyDaysCount} из 100 дней (дек: ${c.decBusy}/31)</td>`).join('')}
+                    </tr>
+                    <tr>
+                        <td class="p-4 font-semibold text-stone-500 bg-stone-50">Описание</td>
+                        ${shortlist.map(c => `<td class="p-4 text-stone-500">${c.desc}</td>`).join('')}
+                    </tr>
+                </tbody>
+            `;
+            table.innerHTML = html;
+        }
+
+        // Budget Calculator Logic
+        function updateBudgetCalc() {
+            const totalBudget = parseFloat(document.getElementById('calc-total-budget').value) || 0;
+            const guests = parseInt(document.getElementById('calc-guests').value) || 1;
+
+            // Suggested splits
+            document.getElementById('calc-res-venue').textContent = (totalBudget * 0.45).toLocaleString() + ' ₸';
+            document.getElementById('calc-res-show').textContent = (totalBudget * 0.25).toLocaleString() + ' ₸';
+            document.getElementById('calc-res-media').textContent = (totalBudget * 0.15).toLocaleString() + ' ₸';
+            document.getElementById('calc-res-decor').textContent = (totalBudget * 0.15).toLocaleString() + ' ₸';
+
+            // Shortlist sum
+            const shortlistSum = shortlist.reduce((acc, curr) => acc + curr.price, 0);
+            document.getElementById('budget-shortlist-sum').textContent = shortlistSum.toLocaleString() + ' ₸';
+
+            const diffBadge = document.getElementById('budget-diff-badge');
+            if (shortlistSum > totalBudget) {
+                diffBadge.className = "px-4 py-2 rounded-xl text-sm font-semibold bg-rose-50 text-rose-700";
+                diffBadge.textContent = `Превышение лимита на ${(shortlistSum - totalBudget).toLocaleString()} ₸`;
+            } else {
+                diffBadge.className = "px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-50 text-emerald-700";
+                diffBadge.textContent = "В пределах лимита бюджета";
+            }
+
+            // Render items in budget calculator
+            const itemsContainer = document.getElementById('budget-shortlist-items');
+            if (shortlist.length === 0) {
+                itemsContainer.innerHTML = `<p class="text-xs text-stone-400 italic">В вашем шортлисте пока нет подрядчиков. Добавьте их из каталога или подбора.</p>`;
+                return;
+            }
+
+            itemsContainer.innerHTML = shortlist.map(c => `
+                <div class="flex items-center justify-between bg-stone-50 p-3 rounded-xl border border-stone-200 text-xs">
+                    <div>
+                        <span class="font-bold text-stone-900">${c.name}</span>
+                        <span class="text-stone-500 ml-2">(${c.category})</span>
+                    </div>
+                    <span class="font-extrabold text-stone-900">${c.price.toLocaleString()} ₸</span>
+                </div>
+            `).join('');
+        }
+
+        const initialPlaces=[
+          {id:1,name:'Rixos President Astana (Банкет залы)',city:'Астана',category:'Банкет залы',lat:51.1282,lng:71.4304,description:'Ірі тойлар мен конференцияларға арналған сәнді зал.',image:'https://images.unsplash.com/photo-1519167758481-83f550bb49b3?auto=format&fit=crop&w=600&q=80',reviews:[{author:'Айдын',text:'Өте керемет қызмет көрсету, тағамдары дәмді!',rating:5},{author:'Динара',text:'Залы өте үлкен әрі әдемі.',rating:4}]},
+          {id:2,name:'ЭКСПО көрме кешені / Бәйтерек',city:'Астана',category:'Әдемі орын',lat:51.0890,lng:71.4190,description:'Астананың көрікті жерлері, кешкі серуенге әдемі орын.',image:'https://images.unsplash.com/photo-1609869688126-78bc2b957cf0?auto=format&fit=crop&w=600&q=80',reviews:[{author:'Мұрат',text:'Кешкі уақытта жарықтар өте әдемі жанады.',rating:5}]},
+          {id:3,name:'Royal Tulip Almaty',city:'Алматы',category:'Банкет залы',lat:43.2031,lng:76.9248,description:'Тау бөктеріндегі мейрамхана және банкет залы.',image:'https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=600&q=80',reviews:[{author:'Жанар',text:'Табиғаты мен ауасы керемет, той өткізуге таптырмас жер.',rating:5}]},
+          {id:4,name:'Көктөбе паркі',city:'Алматы',category:'Әдемі орын',lat:43.2355,lng:76.9632,description:'Алматының панорамалық көрінісі ашылатын әсем парк.',image:'https://images.unsplash.com/photo-1583074317666-3390977bd144?auto=format&fit=crop&w=600&q=80',reviews:[{author:'Еламан',text:'Қала көрінісі тамаша көрінеді.',rating:5}]},
+          {id:5,name:'Rixos Khadisha Shymkent',city:'Шымкент',category:'Банкет залы',lat:42.3181,lng:69.5901,description:'Шымкент қаласындағы қонақүй және іс-шара өткізу орны.',image:'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=600&q=80',reviews:[{author:'Бекжан',text:'Үйлену тойын өткіздік, бәрі жоғары деңгейде өтті.',rating:5}]},
+          {id:6,name:'Қызғалдақ театры / Жайлауов атындағы парк',city:'Шымкент',category:'Әдемі орын',lat:42.3417,lng:69.5901,description:'Қалада серуендеуге және суретке түсуге арналған орындар.',image:'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80',reviews:[{author:'Нұргүл',text:'Суретке түсетін керемет жерлер көп.',rating:4}]}
+        ];
+        let venueMap=null, venueMarkers=[], selectedVenueCity='Барлығы', selectedVenueCategory='Барлығы';
+        function getPlaces(){let userReviews={};try{userReviews=JSON.parse(localStorage.getItem('fb_place_reviews')||'{}')}catch(e){}return initialPlaces.map(p=>({...p,reviews:[...p.reviews,...(userReviews[p.id]||[])]}));}
+        function visiblePlaces(){return getPlaces().filter(p=>(selectedVenueCity==='Барлығы'||p.city===selectedVenueCity)&&(selectedVenueCategory==='Барлығы'||p.category===selectedVenueCategory));}
+        function renderServices(){
+          const places=visiblePlaces(),vl=document.getElementById('venue-list');
+          const cityNames={ru:{'Барлығы':'All cities','Астана':'Astana','Алматы':'Almaty','Шымкент':'Shymkent'},kz:{'Барлығы':'Барлығы','Астана':'Астана','Алматы':'Алматы','Шымкент':'Шымкент'},en:{'Барлығы':'All cities','Астана':'Astana','Алматы':'Almaty','Шымкент':'Shymkent'}}[currentLang];const categoryNames={ru:{'Барлығы':'All categories','Банкет залы':'Banquet hall','Әдемі орын':'Scenic place'},kz:{'Барлығы':'Барлығы','Банкет залы':'Банкет залы','Әдемі орын':'Әдемі орын'},en:{'Барлығы':'All categories','Банкет залы':'Banquet hall','Әдемі орын':'Scenic place'}}[currentLang];const cf=document.getElementById('place-city-filter'),kf=document.getElementById('place-category-filter');if(cf)Array.from(cf.options).forEach(o=>o.textContent=cityNames[o.value||o.textContent]||trCity(o.value||o.textContent));if(kf)Array.from(kf.options).forEach(o=>o.textContent=categoryNames[o.value||o.textContent]||o.textContent);
+          if(vl)vl.innerHTML=places.map(p=>`<article id="place-card-${p.id}" class="rounded-xl border border-stone-200 overflow-hidden bg-white"><img src="${escapeHtml(p.image)}" alt="${escapeHtml(p.name)}" loading="lazy" class="w-full h-36 object-cover"><div class="p-4"><div class="text-xs text-orange-700 font-semibold">${escapeHtml(p.city)} · ${escapeHtml(p.category)}</div><h4 class="font-bold mt-1">${escapeHtml(p.name)}</h4><p class="text-sm text-stone-600 mt-1">${escapeHtml(p.description)}</p><div class="mt-3 border-t pt-3"><h5 class="text-xs font-bold mb-2">${{ru:'Отзывы',kz:'Қонақтардың пікірлері',en:'Guest reviews'}[currentLang]} · ${p.reviews.length}</h5><div class="space-y-2 max-h-32 overflow-y-auto">${p.reviews.map(r=>`<div class="text-xs bg-stone-50 rounded-lg p-2"><div class="flex justify-between font-semibold"><span>${escapeHtml(r.author)}</span><span class="text-amber-500">${'★'.repeat(Math.max(1,Math.min(5,Number(r.rating)||5)))}</span></div><p class="text-stone-600 mt-1">${escapeHtml(r.text)}</p></div>`).join('')}</div></div><button onclick="toggleVenueReview(${p.id})" class="mt-3 w-full px-3 py-2 rounded-lg bg-stone-100 hover:bg-stone-200 text-sm">${{ru:'Оставить отзыв',kz:'Пікір қалдыру',en:'Write a review'}[currentLang]}</button><form id="venue-review-form-${p.id}" class="hidden mt-3 space-y-2" onsubmit="submitVenueReview(event,${p.id})"><input id="venue-author-${p.id}" required maxlength="60" placeholder="${{ru:'Ваше имя',kz:'Атыңыз',en:'Your name'}[currentLang]}" class="w-full border rounded-lg px-3 py-2 text-sm"><textarea id="venue-text-${p.id}" required maxlength="500" placeholder="${{ru:'Ваш отзыв',kz:'Пікіріңіз',en:'Your review'}[currentLang]}" class="w-full border rounded-lg px-3 py-2 text-sm"></textarea><div class="flex gap-2"><select id="venue-rating-${p.id}" class="border rounded-lg px-2 py-2 text-sm"><option value="5">5 ★</option><option value="4">4 ★</option><option value="3">3 ★</option><option value="2">2 ★</option><option value="1">1 ★</option></select><button class="flex-1 rounded-lg bg-orange-600 text-white text-sm px-3 py-2">${{ru:'Добавить отзыв',kz:'Пікірді қосу',en:'Add review'}[currentLang]}</button></div></form></div></article>`).join('')||`<p class="text-sm text-stone-500">${{ru:'По этим фильтрам ничего не найдено.',kz:'Бұл сүзгілер бойынша орын табылмады.',en:'No places match these filters.'}[currentLang]}</p>`;
+          const cityFilter=document.getElementById('place-city-filter'),catFilter=document.getElementById('place-category-filter');if(cityFilter&&!cityFilter.dataset.bound){cityFilter.dataset.bound='1';cityFilter.addEventListener('change',()=>{selectedVenueCity=cityFilter.value;renderServices()})}if(catFilter&&!catFilter.dataset.bound){catFilter.dataset.bound='1';catFilter.addEventListener('change',()=>{selectedVenueCategory=catFilter.value;renderServices()})}if(cityFilter)cityFilter.value=selectedVenueCity;if(catFilter)catFilter.value=selectedVenueCategory;
+          renderEventMap(places);renderExpenses();updatePayEstimate();
+        }
+        function toggleVenueReview(id){const f=document.getElementById('venue-review-form-'+id);if(f)f.classList.toggle('hidden')}
+        function submitVenueReview(e,id){e.preventDefault();const author=document.getElementById('venue-author-'+id).value.trim(),text=document.getElementById('venue-text-'+id).value.trim(),rating=Number(document.getElementById('venue-rating-'+id).value);if(!author||!text)return;let all={};try{all=JSON.parse(localStorage.getItem('fb_place_reviews')||'{}')}catch(e){}all[id]=all[id]||[];all[id].push({author,text,rating});localStorage.setItem('fb_place_reviews',JSON.stringify(all));renderServices();}
+        function renderEventMap(places){const el=document.getElementById('event-map');if(!el)return;if(!window.L){el.innerHTML=`<p class="p-4 text-sm text-stone-600">${{ru:'Карта загружается из интернета. Пока откройте карту:',kz:'Карта интернеттен жүктеледі. Әзірге картаны ашыңыз:',en:'The map loads from the internet. Open the map meanwhile:'}[currentLang]} <a class="underline text-sky-700" target="_blank" rel="noopener" href="https://www.openstreetmap.org/#map=5/48.0/66.9">OpenStreetMap</a></p>`;return;}if(!venueMap){L.Icon.Default.mergeOptions({iconRetinaUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',iconUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'});venueMap=L.map(el,{scrollWheelZoom:false}).setView([48.0196,66.9237],5);L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:18,attribution:'© OpenStreetMap'}).addTo(venueMap);}venueMap.invalidateSize();venueMarkers.forEach(m=>m.remove());venueMarkers=places.map(p=>L.marker([p.lat,p.lng]).addTo(venueMap).bindPopup(`<b>${escapeHtml(p.name)}</b><br>${escapeHtml(p.city)} · ${escapeHtml(p.category)}<br>${{ru:'Отзывы',kz:'Пікірлер',en:'Reviews'}[currentLang]}: ${p.reviews.length}<br><button onclick="document.getElementById('place-card-${p.id}').scrollIntoView({behavior:'smooth',block:'center'})">${{ru:'Открыть карточку',kz:'Карточканы ашу',en:'Open listing'}[currentLang]}</button>`));if(places.length){const bounds=L.latLngBounds(places.map(p=>[p.lat,p.lng]));venueMap.fitBounds(bounds.pad(.25),{maxZoom:12});}}
+        function updatePayEstimate(){const amount=Number(document.getElementById('pay-amount')?.value||0),months=Number(document.getElementById('pay-installments')?.value||1);const node=document.getElementById('pay-estimate');if(node)node.textContent=`${{ru:'Ориентировочно',kz:'Шамамен',en:'Estimate'}[currentLang]}: ${(amount/months).toLocaleString()} ₸ / ${months} ${months===1?'':{ru:'мес.',kz:'ай',en:'months'}[currentLang]}`;}
+        function demoPay(){const provider=document.getElementById('pay-provider').value;alert({ru:`Демо: ${provider} төлеміне өту үшін Firebird-ке банк эквайрингі мен серверлік қауіпсіз интеграция қажет. Ешқандай төлем жасалған жоқ.`,kz:`Демо: ${provider} арқылы төлеу үшін банк эквайрингі мен қауіпсіз серверлік интеграция қажет. Төлем жасалған жоқ.`,en:`Demo: ${provider} payments require bank merchant acquiring and a secure server integration. No payment was made.`}[currentLang]);}
+        function loadExpenses(){try{return JSON.parse(localStorage.getItem('fb_expenses')||'[]')}catch(e){return []}}
+        function renderExpenses(){const entries=loadExpenses(),box=document.getElementById('expense-list'),total=document.getElementById('expense-total');if(!box)return;box.innerHTML=entries.map((x,i)=>`<div class="flex justify-between text-sm border-b py-2"><span>${x.name}</span><span>${Number(x.amount).toLocaleString()} ₸ <button onclick="removeExpense(${i})" class="ml-2 text-rose-600">×</button></span></div>`).join('')||`<p class="text-xs text-stone-400">${{ru:'Расходов пока нет.',kz:'Әзірге шығын жоқ.',en:'No expenses yet.'}[currentLang]}</p>`;if(total)total.textContent=`${{ru:'Всего:',kz:'Барлығы:',en:'Total:'}[currentLang]} ${entries.reduce((a,x)=>a+Number(x.amount),0).toLocaleString()} ₸`;}
+        function addExpense(){const name=document.getElementById('expense-name').value.trim(),amount=Number(document.getElementById('expense-amount').value);if(!name||amount<=0)return;const a=loadExpenses();a.push({name,amount});localStorage.setItem('fb_expenses',JSON.stringify(a));document.getElementById('expense-name').value='';document.getElementById('expense-amount').value='';renderExpenses();}
+        function removeExpense(i){const a=loadExpenses();a.splice(i,1);localStorage.setItem('fb_expenses',JSON.stringify(a));renderExpenses();}
+        function escapeHtml(value){return String(value).replace(/[&<>\"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[ch]));}
+        function makeInvite(){const names=document.getElementById('invite-names').value.trim(),date=document.getElementById('invite-date').value,place=document.getElementById('invite-place').value.trim();if(!names||!date||!place)return;const body={ru:`Құрметті қонақ!
+
+Сізді ${names} қуанышына шақырамыз.
+Күні: ${date}
+Мекенжайы: ${place}
+
+Келетініңізді хабарлаңыз!`,kz:`Құрметті қонақ!
+
+Сізді ${names} тойына шақырамыз.
+Күні: ${date}
+Мекенжайы: ${place}
+
+Келетініңізді хабарлаңыз!`,en:`Dear guest,
+
+You are invited to celebrate ${names}.
+Date: ${date}
+Venue: ${place}
+
+Please RSVP!`}[currentLang];document.getElementById('invite-preview').innerHTML=`<pre class="whitespace-pre-wrap bg-orange-50 rounded-xl p-4 text-sm">${escapeHtml(body)}</pre><div class="mt-3 flex flex-wrap gap-2"><button id="invite-download" class="text-sm px-3 py-2 rounded-lg bg-stone-100">${{ru:'Скачать текст',kz:'Мәтінді жүктеу',en:'Download text'}[currentLang]}</button><button id="invite-whatsapp" class="text-sm px-3 py-2 rounded-lg bg-emerald-600 text-white">WhatsApp</button><button id="invite-telegram" class="text-sm px-3 py-2 rounded-lg bg-sky-600 text-white">Telegram</button><button id="invite-mail" class="text-sm px-3 py-2 rounded-lg bg-stone-800 text-white">Email</button></div>`;document.getElementById('invite-download').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([body],{type:'text/plain;charset=utf-8'}));a.download='firebird-invitation.txt';a.click();URL.revokeObjectURL(a.href)};const phone=document.getElementById('invite-phone').value.replace(/[^+\d]/g,''),email=document.getElementById('invite-email').value.trim();document.getElementById('invite-whatsapp').onclick=()=>{const base='https://wa.me/'+phone;window.open((phone?base+'?text=':'https://wa.me/?text=')+encodeURIComponent(body),'_blank','noopener')};document.getElementById('invite-telegram').onclick=()=>window.open('https://t.me/share/url?url=&text='+encodeURIComponent(body),'_blank','noopener');document.getElementById('invite-mail').onclick=()=>{location.href='mailto:'+encodeURIComponent(email)+'?subject='+encodeURIComponent({ru:'Приглашение',kz:'Шақыру',en:'Invitation'}[currentLang])+'&body='+encodeURIComponent(body)};}
+        document.addEventListener('input',e=>{if(e.target.id==='pay-amount'||e.target.id==='pay-installments')updatePayEstimate()});
+        document.addEventListener('change',e=>{if(e.target.id==='pay-amount'||e.target.id==='pay-installments')updatePayEstimate()});
+
+        // Initialize on load
+        window.onload = function() {
+            let savedLang = 'ru';
+            try { savedLang = localStorage.getItem('fb_lang') || 'ru'; } catch (e) {}
+            loadOrganizer();
+            setLanguage(savedLang);
+        };
+    </script>
+</body>
+</html>
